@@ -83,3 +83,5 @@ Queue plans remain in the current scene, with project ranks, new task briefs/pri
 The spoken channel carries the synopsis and decision; full grounded alternatives remain visual. Transitions stay with new work, advance on explicit intent or a clear handoff, and ask when unclear. These are semantic interaction states, not confidence thresholds.
 
 Synthetic release previews: [task plan and approval](images/task-plan.jpg), [dictation shortcut](images/dictation-shortcut.jpg).
+
+Installed Mac verification confirmed shortcut capture, autosave and playback interruption with a custom chord, then restored Fn. Physical Fn cannot be synthesized by the automation driver; its real-keyboard/Wispr gesture is not claimed as an automated test. The existing Claude bridge grant was refreshed and the connection verified.
