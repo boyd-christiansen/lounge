@@ -39,7 +39,7 @@ The initial view presents four sections: Voice, Memory, Connections and Flow. On
 | Finding | Change | Check |
 | --- | --- | --- |
 | The panel used many tiny labels, offsets and unrelated gaps. | Shared 24px gutters, 13px field text, 12px labels and 11px metadata; restrained neutral inks. | Fields and section headings use the same left edge. |
-| Pace, Delivery and Listen competed along an uneven baseline. | Equal-width Pace/Delivery fields with matching heights. Preview is a separate, aligned action. | Both select boxes are 36px high and share top and bottom edges. |
+| Pace, Delivery and Listen competed along an uneven baseline. | Equal-width Pace/Delivery fields with matching heights. Preview is a separate, aligned action. | Both select boxes are 36px high and share top and bottom edges. The native check found WebKit’s platform popup appearance ignored sizing; removing that appearance and using the pinned chevron fixes the native fields too. |
 | Connected status, disconnect and eligibility copy crowded the main voice choice. | Place them under ElevenLabs connection. Missing configuration/errors reveal that disclosure. | Connected and expanded-detail states inspected. |
 | Save disappeared below long settings. | A stable footer keeps Save visible while the form scrolls. | Save stays in place in Voice, Memory and Connections. |
 | Save looked actionable when nothing changed. | Disable it until a preference changes. Retain unsaved edits when the drawer closes. | Changed pace, reopened the drawer, saved and restored the synthetic preference. |

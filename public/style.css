@@ -119,3 +119,8 @@ body.drawer-open #drawer{transform:translateX(0)}
 .save-settings:disabled{background:#ffffff08;color:#a9a9af;opacity:1;cursor:default;border-color:#ffffff18}
 .settings-content>label:first-child{margin-top:0}.settings-content label{margin-top:16px}
 .icon-button,#sound{font-size:inherit}
+
+/* Native WebKit ignores popup sizing while platform appearance is enabled. */
+.settings-content select{appearance:none;-webkit-appearance:none;height:36px;line-height:18px;padding:8px 36px 8px 10px;background-image:url('/assets/select-chevron.svg');background-size:16px 16px;background-repeat:no-repeat;background-position:right 10px center}
+.settings-content input:not([type="checkbox"]){height:36px;line-height:18px}
+.settings-content select:disabled{opacity:.55;cursor:default}
