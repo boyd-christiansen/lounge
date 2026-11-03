@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
 import {Store} from '../lib/store.mjs';
 import {Engine} from '../lib/engine.mjs';
-import {validateShortcut,shortcutEvent,matchesShortcut,shortcutLabel,transitionDecision} from '../public/interaction.js';
+import {validateShortcut,shortcutEvent,matchesShortcut,shortcutLabel,transitionDecision,createDictationHold,canResumeReadAloud,playbackPosition} from '../public/interaction.js';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 class Transport extends EventEmitter {
   constructor(){super();this.turns=0;this.interrupts=[];this.replies=[];this.next=0;}
@@ -23,6 +23,26 @@ test('dictation shortcuts recognize the first Fn press and preserve normal typin
   assert.equal(shortcutEvent({code:'KeyA',repeat:true}),null);assert.throws(()=>validateShortcut({code:'KeyA',modifiers:[]}),/ordinary typing/);
   const chord=validateShortcut({code:'Space',modifiers:['shift','meta']});assert.ok(matchesShortcut(chord,shortcutEvent({code:'Space',metaKey:true,shiftKey:true,type:'keydown'})));assert.ok(!matchesShortcut(chord,shortcutEvent({code:'Space',metaKey:true,type:'keydown'})));
   assert.deepEqual(validateShortcut({code:'MetaRight',modifiers:['meta']}),{code:'MetaRight',modifiers:[]});assert.equal(validateShortcut(null),null);
+});
+test('hold-to-talk and repeated Fn taps keep audio held until the completed thought',()=>{
+  const hold=createDictationHold(),origin={key:'original',binding:{taskId:'original',requestId:'old-question'},playback:{text:'Original summary',offset:4}};
+  hold.press(origin);assert.equal(hold.held,true);assert.equal(hold.keyDown,true);hold.releaseKey();assert.equal(hold.held,true);
+  hold.press({key:'changed',binding:{requestId:'new-question'},playback:null});hold.releaseKey();assert.equal(hold.held,true);assert.equal(hold.snapshot,origin);
+  // The third tap ending latched dictation is still a hold, not a resume.
+  hold.press({key:'changed'});hold.releaseKey();assert.equal(hold.snapshot.binding.requestId,'old-question');assert.equal(hold.held,true);
+  assert.equal(hold.complete(),origin);assert.equal(hold.held,false);assert.equal(hold.snapshot,null);
+});
+test('manual read-aloud resume is unavailable during a key hold, a draft, recording or work in flight',()=>{
+  const base={held:true,session:true};assert.equal(canResumeReadAloud(base),true);
+  for(const patch of [{keyDown:true},{draft:'My unfinished thought'},{answers:['An unfinished answer']},{editing:true},{drawer:true},{busy:true},{recording:true}])assert.equal(canResumeReadAloud({...base,...patch}),false);
+  assert.equal(canResumeReadAloud({session:true}),false);
+});
+test('resuming cached audio continues from the accumulated playback position',()=>{
+  assert.equal(playbackPosition({offset:3,startedAt:10},14),7);
+  assert.equal(playbackPosition({offset:7,startedAt:null},100),7);
+  assert.equal(playbackPosition({offset:7,startedAt:20},22),9);
+  assert.equal(playbackPosition({offset:0,startedAt:0},2),2);
+  assert.equal(playbackPosition({offset:0,startedAt:10},5),0);
 });
 test('new work stays in focus, explicit next moves, and an ambiguous response asks',()=>{
   const capture={actions:[{tool:'lounge_capture',taskId:'new'}],instruction:'Start a new task.',activeTaskIds:['new']};

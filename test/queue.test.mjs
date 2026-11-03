@@ -119,7 +119,7 @@ test('a new thought during a worker question goes to the conductor without answe
   const sent = JSON.parse(codex.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text);
   assert.equal(sent.currentTask.pending[0].question,'Which format?');assert.match(sent.userInstruction,/New task/);
   assert.equal(store.get(worker.id).status,'waiting');assert.equal(codex.replies.length,0);
-  assert.equal(result.toolVersion,13);store.close();
+  assert.equal(result.toolVersion,14);store.close();
 });
 test('conductor answers only the displayed question and preserves the exact complete thought', async () => {
   const { engine, store, codex } = fixture(), worker = engine.capture({ title: 'Worker' });
@@ -160,14 +160,15 @@ test('chat discovery creates bounded preview cards with preserved source titles 
   const {engine,store,codex}=fixture();
   const c=await engine.conductor('Find the sample planning chat.');
   engine.discover=async()=>({threads:[{id:'sample-chat',title:'Original source title',preview:'Unformatted source preview',cwd:'/sample/Planning',updatedAt:'2026-11-01T00:00:00Z'}]});
-  engine.readOnlyJson=async()=>({descriptions:[{id:'sample-chat',description:'Plan a small product launch and its next steps.'}]});
+  engine.readOnlyJson=async()=>{throw new Error('Search must not wait for another model call');};
   await engine.request({id:123,method:'item/tool/call',params:{threadId:c.threadId,tool:'lounge_find_chats',arguments:{query:'sample'}}});
   const result=codex.replies.at(-1).result;assert.equal(result.success,true);
-  const batch=JSON.parse(result.contentItems[0].text);assert.equal(batch.candidates[0].title,'Original source title');assert.equal(batch.candidates[0].preview,'Plan a small product launch and its next steps.');
+  assert.equal(store.get(c.id).routingContext.actions.at(-1).tool,'lounge_find_chats');
+  const batch=JSON.parse(result.contentItems[0].text);assert.equal(batch.candidates[0].title,'Original source title');assert.equal(batch.candidates[0].preview,'Unformatted source preview');
   assert.equal(store.all().filter(t=>!t.isConductor).length,0);
   await assert.rejects(engine.confirmImports(c.id,{batchId:batch.id,threadIds:['sample-chat']}),/later exchange/);
   await engine.request({id:124,method:'item/tool/call',params:{threadId:c.threadId,tool:'lounge_ask',arguments:{question:'Is this the chat you want to bring in?'}}});
-  assert.equal(store.get(c.id).status,'waiting');
+  assert.equal(store.get(c.id).status,'waiting');assert.equal(store.get(c.id).pending[0].importBatchId,batch.id);
   await engine.conductor('No, leave it out.',{taskId:c.id,requestId:store.get(c.id).pending[0].id});assert.equal(store.all().filter(t=>!t.isConductor).length,0);assert.equal(store.get(c.id).status,'running');store.close();
 });
 
@@ -184,4 +185,21 @@ test('a new entry thought cannot answer an unseen coordinator question', async (
   assert.equal(store.get(c.id).status,'waiting');assert.equal(codex.replies.length,0);
   await engine.conductor('The current workspace.',{taskId:c.id,requestId:store.get(c.id).pending[0].id});
   assert.equal(codex.replies.length,1);store.close();
+});
+
+
+test('search preview survives an ordinary finished turn and imports once after a later yes',async()=>{
+  const {engine,store,codex}=fixture();let c=await engine.conductor('Find the launch chat');
+  const batch={id:'durable-preview',application:'codex',proposedInRun:store.get(c.id).routingContext.runId,candidates:[{id:'source-launch',title:'Launch planning',preview:'Prepare a launch.'}]};
+  store.update(c.id,{artifactBatch:batch,summary:'Preview ready'});engine.notification({providerId:'codex',sessionId:c.threadId,type:'turn.ended',status:'completed'});
+  c=await engine.conductor('Yes, add that chat');
+  assert.equal(store.get(c.id).artifactBatch.id,batch.id);
+  const input=JSON.parse(codex.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text);
+  assert.equal(input.importPreview.id,batch.id);
+  let reads=0;engine.providers.adapter('codex').readSource=async()=>{reads++;return{id:'source-launch',title:'Launch planning',preview:'Prepare a launch.',updatedAt:'2026-01-01',cwd:'/sample/Launch'};};
+  engine.refreshSource=async()=>{};
+  const first=await engine.confirmImports(c.id,{batchId:batch.id,threadIds:['source-launch']});
+  const again=await engine.confirmImports(c.id,{batchId:batch.id,threadIds:['source-launch']});
+  assert.equal(first.imported[0].id,again.imported[0].id);assert.equal(reads,1);assert.equal(store.all().filter(t=>!t.isConductor).length,1);
+  engine.close();store.close();
 });

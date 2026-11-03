@@ -9,7 +9,7 @@ Local, single-user command center for parallel agents. This project does not aut
 - Result completion means ready for review. Only a user's explicit acknowledgment clears a task.
 - A notification must not change the focused task, destroy a draft, or reinterpret a reply against an unseen question.
 - The main interface is one full-screen scene. The queue and settings live in a drawer revealed from the left edge. Do not reintroduce dashboard navigation, stats, or panels into the room.
-- Completed Wispr/bulk dictation auto-submits by default. Ordinary typing waits for Enter; native microphone capture submits only after the user stops it. Never infer a pause in a thought from a silence timer.
+- Completed Wispr/bulk dictation pasted outside the composer auto-submits by default. Composer pastes and ordinary typing wait for Enter; native microphone capture submits only after the user stops it. Never infer a pause in a thought from a silence timer.
 - Inference uses the user's existing Codex sign-in. Never read, copy, or log auth tokens. Do not bypass provider approvals or sandboxing.
 - Maintain `docs/PROGRESS.md` at meaningful handoff boundaries. Run `npm run check` and `npm test` after runtime changes. No dependencies are required.
 - Keep the localhost interface private: bind to loopback, validate Host/Origin, and require the session CSRF capability on mutations. Remote access needs a separate authenticated design.

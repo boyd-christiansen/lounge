@@ -1,5 +1,6 @@
-import {shortcutEvent,isModifierCode,matchesShortcut,shortcutLabel,validateShortcut,transitionDecision} from './interaction.js';
-import { fingerprint, pickNext, sourceUrl, isDictationCommit, parseScene, normalizeScene, assertDraftTarget, queuePreview, renderMarkdown, briefingNarration, canRefocus, acceptsRoomPaste, taskBrief, entryScene, entryIntent, maySurfaceQueue } from './flow.js';
+import { importPreviewScene, chatDescription } from './discovery.js';
+import {shortcutEvent,isModifierCode,matchesShortcut,shortcutLabel,validateShortcut,transitionDecision,createDictationHold,canResumeReadAloud,playbackPosition} from './interaction.js';
+import { fingerprint, pickNext, sourceUrl, isDictationCommit, pasteDisposition, immediateAcknowledgement, parseScene, normalizeScene, assertDraftTarget, queuePreview, renderMarkdown, briefingNarration, canRefocus, taskBrief, entryScene, entryIntent, maySurfaceQueue } from './flow.js';
 import { icon } from './icons.js';
 import { createAutosave } from './autosave.js';
 import { taskState, shortcutMarkup } from './task-status.js';
@@ -44,6 +45,8 @@ function savePreference(patch,debounce=false){
 }
 let shortcutCapture=false,shortcutModifier=null,activeSubmission=null,cancellingThought=false,stopAwaiting=null;
 let drawerPinned = false, hoverTimer, closeTimer, noticeTimer, autoSendTimer, advanceTimer, dragId, lastPasteAt = 0, lastManualKeyAt = 0, lastValue = '';
+const dictationHold=createDictationHold();let playback=null;
+let voicePlaying=false,voiceAnalyser=null,voiceFrame=null;
 let voiceAudio = null, voiceAbort = null, voiceUrl = null, audioContext=null, audioSource=null, queuedPaste=false, firstBrief=true,queueStarted=false;
 const sceneCache=new Map(), audioCache=new Map(), audioErrors=new Set();let warming=false,greetingAudioWarmed=false,explicitVoiceRetry=false,voiceFailure=null;
 function unlockAudio(){try{const AudioContext=window.AudioContext||window.webkitAudioContext;if(AudioContext){audioContext ||= new AudioContext();audioContext.resume().catch(()=>{});}}catch{}}
@@ -51,13 +54,13 @@ function sceneKey(task){return JSON.stringify([fingerprint(task),task.brief,task
 function preparedScene(task){const key=sceneKey(task);if(!sceneCache.has(key)){const pending=api('brief',{taskId:task.id});sceneCache.set(key,pending);pending.then(scene=>{if(scene.saved&&sceneCache.get(key)===pending)sceneCache.delete(key);},()=>{if(sceneCache.get(key)===pending)sceneCache.delete(key);});while(sceneCache.size>12)sceneCache.delete(sceneCache.keys().next().value);}return sceneCache.get(key);}
 function resetVoicePlayback(){voiceFailure=null;audioCache.clear();audioErrors.clear();explicitVoiceRetry=true;greetingAudioWarmed=false;}
 function voiceInput(text,profile){return{text:text.replace(/\[([^\]]+)\]\([^)]+\)/g,'$1').replace(/[#*`]/g,''),voiceId:profile.naturalVoiceId,rate:profile.voiceRate||1,tone:profile.voiceTone||'natural'};}
-function preparedAudio(text,profile){const input=voiceInput(text,profile),key=JSON.stringify(input);if(explicitVoiceRetry){if(audioErrors.has(key))audioCache.delete(key);audioErrors.delete(key);input.retry=true;voiceFailure=null;explicitVoiceRetry=false;}if(voiceFailure)return Promise.reject(voiceFailure);if(!audioCache.has(key)){const pending=fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json','X-Lounge-Token':token},body:JSON.stringify(input)}).then(async res=>{if(!res.ok){const value=await res.json();throw new Error(value.error||'The voice could not be played');}return res.arrayBuffer();});audioCache.set(key,pending);pending.catch(error=>{audioErrors.add(key);voiceFailure=error;});while(audioCache.size>4)audioCache.delete(audioCache.keys().next().value);}return audioCache.get(key);}
+function preparedAudio(text,profile){const input=voiceInput(text,profile),key=JSON.stringify(input);if(explicitVoiceRetry){if(audioErrors.has(key))audioCache.delete(key);audioErrors.delete(key);input.retry=true;voiceFailure=null;explicitVoiceRetry=false;}if(voiceFailure)return Promise.reject(voiceFailure);if(!audioCache.has(key)){const pending=fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json','X-Lounge-Token':token},body:JSON.stringify(input)}).then(async res=>{if(!res.ok){const value=await res.json();throw new Error(value.error||'The voice could not be played');}return res.arrayBuffer();});audioCache.set(key,pending);pending.catch(error=>{audioErrors.add(key);voiceFailure=error;});while(audioCache.size>12)audioCache.delete(audioCache.keys().next().value);}return audioCache.get(key);}
 async function warmUpcoming(){
   if(warming||!token)return;warming=true;
   try{
     const canSpeak=state.profile.autoRead&&state.speech?.ready&&state.profile.voiceProvider==='elevenlabs'&&!silentPreview;
     // Warm the short greeting first; synthesis of a source never delays entry.
-    if(!queueStarted&&!greetingAudioWarmed&&canSpeak){greetingAudioWarmed=true;preparedAudio(entryScene(state.profile.name).spoken,state.profile).catch(()=>{});}
+    if(!queueStarted&&!greetingAudioWarmed&&canSpeak){greetingAudioWarmed=true;preparedAudio(entryScene(state.profile.name).spoken,state.profile).catch(()=>{});for(const text of ['I’ll look for that conversation.','Let me check your queue.','Let me think about that.'])preparedAudio(text,state.profile).catch(()=>{});}
     const candidates=openTasks().filter(t=>t.status!=='running'&&t.id!==currentId&&seen[t.id]!==fingerprint(t)).slice(0,2);
     await Promise.allSettled(candidates.map(t=>preparedScene(t)));
     if(canSpeak&&candidates[0]){
@@ -66,7 +69,7 @@ async function warmUpcoming(){
     }
   }catch{}finally{warming=false;}
 }
-function safeToRefocus(){return canRefocus({busy,recording,pendingConductor,text:$('#thought').value,answers:[...$('#scene-question').querySelectorAll('textarea,input:checked')].map(e=>e.value)});}
+function safeToRefocus(){return !dictationHold.held&&canRefocus({busy,recording,pendingConductor,text:$('#thought').value,answers:[...$('#scene-question').querySelectorAll('textarea,input:checked')].map(e=>e.value)});}
 
 let importPreview=null;
 const presentedTasks=new Set();
@@ -84,34 +87,57 @@ async function api(path, data) {
   const value = await res.json(); if (!res.ok) throw new Error(value.error || 'Something interrupted the connection'); return value;
 }
 function notice(text) { $('#notice').textContent = text; $('#notice').classList.add('visible'); clearTimeout(noticeTimer); noticeTimer=setTimeout(()=>$('#notice').classList.remove('visible'),6500); }
-function setBusy(value) { busy=value; document.body.classList.toggle('busy',value); $('#thought-area').classList.toggle('sending',value); renderThoughtControl();if(!value&&queuedPaste){queuedPaste=false;scheduleSend();} }
+function setBusy(value) { busy=value; document.body.classList.toggle('busy',value); $('#thought-area').classList.toggle('sending',value); renderThoughtControl();renderPresence();if(!value&&queuedPaste){queuedPaste=false;scheduleSend();} }
 function showTransition(title, subtitle='Checking what has come back.') {
-  $('#review-response').hidden=true;$('.thinking-orbit').hidden=false;$('#welcome').hidden=true; $('#scene').hidden=true; $('#transition').hidden=false;
-  $('#transition-text').textContent=title; $('#transition-subtext').textContent=subtitle;
+  $('#review-response').hidden=true;$('#welcome').hidden=true; $('#scene').hidden=true; $('#transition').hidden=false;
+  $('#transition-text').textContent=title; $('#transition-subtext').textContent=subtitle;$('#transition-subtext').hidden=!subtitle;renderPresence();
 }
-function stopSpeaking() { soundGeneration++;if(audioSource){audioSource.onended=null;try{audioSource.stop();}catch{}audioSource=null;}voiceAbort?.abort(); voiceAbort=null; if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}if(voiceUrl){URL.revokeObjectURL(voiceUrl);voiceUrl=null;} if ('speechSynthesis' in window) speechSynthesis.cancel(); speechActive=false; document.body.classList.remove('speaking'); }
-async function speak(text, onEnd, profile = state.profile) {
+function renderPresence(){
+  const el=$('#presence');el.hidden=!$('#welcome').hidden;
+  el.dataset.mode=voicePlaying?'speaking':busy||speechActive||(!$('#transition').hidden&&$('#review-response').hidden)?'thinking':dictationHold.held?'paused':'idle';
+  el.classList.toggle('audio-driven',!!voiceAnalyser&&voicePlaying);
+}
+function stopVoiceMeter(){if(voiceFrame)cancelAnimationFrame(voiceFrame);voiceFrame=null;voiceAnalyser?.disconnect();voiceAnalyser=null;$('#presence').style.removeProperty('--voice-level');}
+function startVoiceMeter(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  const samples=new Uint8Array(256);let smooth=0;
+  const frame=()=>{if(!voiceAnalyser||!voicePlaying)return;voiceAnalyser.getByteTimeDomainData(samples);const rms=Math.sqrt(samples.reduce((sum,v)=>sum+((v-128)/128)**2,0)/samples.length);smooth=smooth*.65+Math.min(1,rms*6)*.35;$('#presence').style.setProperty('--voice-level',smooth.toFixed(3));voiceFrame=requestAnimationFrame(frame);};frame();
+}
+function stopSpeaking() { soundGeneration++;stopVoiceMeter();voicePlaying=false;if(audioSource){audioSource.onended=null;try{audioSource.stop();}catch{}audioSource=null;}voiceAbort?.abort(); voiceAbort=null; if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}if(voiceUrl){URL.revokeObjectURL(voiceUrl);voiceUrl=null;} if ('speechSynthesis' in window) speechSynthesis.cancel(); speechActive=false;playback=null; document.body.classList.remove('speaking');renderPresence(); }
+async function speak(text, onEnd, profile = state.profile, resume = {}) {
+  if(dictationHold.held||recording)return;
   stopSpeaking(); const run=soundGeneration;
   if (!text || !profile.autoRead || silentPreview) { if (onEnd) advanceTimer=setTimeout(onEnd,3500); return; }
   const clean=text.replace(/\[([^\]]+)\]\([^)]+\)/g,'$1').replace(/[#*`]/g,'');
-  const ended=()=>{if(run!==soundGeneration)return;speechActive=false;document.body.classList.remove('speaking');if(onEnd)advanceTimer=setTimeout(onEnd,900);};
-  speechActive=true; document.body.classList.add('speaking');
+  const voicePlayback={text:clean,profile:{...profile},scene:currentScene,offset:resume.offset||0,startedAt:null,buffer:null,charIndex:resume.charIndex||0};playback=voicePlayback;
+  const ended=()=>{if(run!==soundGeneration)return;playback=null;speechActive=false;voicePlaying=false;stopVoiceMeter();document.body.classList.remove('speaking');renderPresence();if(onEnd)advanceTimer=setTimeout(onEnd,900);};
+  speechActive=true;renderPresence();
   if(profile.voiceProvider==='elevenlabs'){
     try{
-      const bytes=await preparedAudio(clean,profile);if(run!==soundGeneration)return;
-      if(audioContext){await audioContext.resume();const buffer=await audioContext.decodeAudioData(bytes.slice(0));if(run!==soundGeneration)return;if(audioContext.state!=='running')throw new Error('Press Listen to enable voice playback.');audioSource=audioContext.createBufferSource();audioSource.buffer=buffer;audioSource.connect(audioContext.destination);audioSource.onended=ended;audioSource.start();}
-      else{voiceUrl=URL.createObjectURL(new Blob([bytes],{type:'audio/mpeg'}));voiceAudio=new Audio(voiceUrl);voiceAudio.onended=ended;await voiceAudio.play();}
+      const bytes=resume.buffer?null:await preparedAudio(clean,profile);if(run!==soundGeneration)return;
+      if(audioContext){
+        await audioContext.resume();const buffer=resume.buffer||await audioContext.decodeAudioData(bytes.slice(0));if(run!==soundGeneration)return;
+        if(audioContext.state!=='running')throw new Error('Press Listen to enable voice playback.');
+        const offset=Math.max(0,Math.min(resume.offset||0,Math.max(0,buffer.duration-.001)));
+        Object.assign(voicePlayback,{buffer,offset,startedAt:audioContext.currentTime});
+        audioSource=audioContext.createBufferSource();audioSource.buffer=buffer;voiceAnalyser=audioContext.createAnalyser();voiceAnalyser.fftSize=256;audioSource.connect(voiceAnalyser);voiceAnalyser.connect(audioContext.destination);audioSource.onended=ended;audioSource.start(0,offset);voicePlaying=true;document.body.classList.add('speaking');renderPresence();startVoiceMeter();
+      }else{
+        voiceUrl=URL.createObjectURL(new Blob([bytes],{type:'audio/mpeg'}));voiceAudio=new Audio(voiceUrl);
+        if(resume.offset)voiceAudio.addEventListener('loadedmetadata',()=>{if(voiceAudio&&run===soundGeneration)voiceAudio.currentTime=resume.offset;},{once:true});
+        voiceAudio.onended=ended;voiceAudio.onplaying=()=>{if(run===soundGeneration){voicePlaying=true;document.body.classList.add('speaking');renderPresence();}};await voiceAudio.play();
+      }
     }catch(error){if(run!==soundGeneration)return;stopSpeaking();notice(error.message);if(!$('#replay-voice'))$('#scene-actions').insertAdjacentHTML('beforeend','<button id="replay-voice">Listen ↗</button>');}
     return;
   }
   if(!('speechSynthesis' in window)){ended();return;}
   const voices=speechSynthesis.getVoices();
   const voice=voices.find(v=>v.name===profile.voiceName)||voices.find(v=>/premium|enhanced|natural/i.test(v.name)&&v.lang.startsWith('en'));
-  const utterance=new SpeechSynthesisUtterance(clean);utterance.rate=profile.voiceRate||1;if(voice)utterance.voice=voice;
-  utterance.onend=ended;utterance.onerror=()=>{if(run===soundGeneration)stopSpeaking();};speechSynthesis.speak(utterance);
+  const utterance=new SpeechSynthesisUtterance(clean.slice(voicePlayback.charIndex));utterance.rate=profile.voiceRate||1;if(voice)utterance.voice=voice;
+  utterance.onboundary=e=>{if(run===soundGeneration)voicePlayback.charIndex=(resume.charIndex||0)+e.charIndex;};
+  utterance.onstart=()=>{if(run===soundGeneration){voicePlaying=true;document.body.classList.add('speaking');renderPresence();}};utterance.onend=ended;utterance.onerror=()=>{if(run===soundGeneration)stopSpeaking();};speechSynthesis.speak(utterance);
 }
 function renderChrome() {
-  renderThoughtControl();syncNativeShortcut();
+  renderThoughtControl();renderPlaybackHold();syncNativeShortcut();
   $('#hello').textContent=entryScene(state.profile.name).title;
   $('#rotation-mode').value=state.rotationMode||'all';$('#queue-filter').value=state.rotationMode||'all';
   $('#codex-status').textContent=state.connection.state==='connected'?'Connected with your ChatGPT sign-in':'Use your existing ChatGPT sign-in';
@@ -250,14 +276,14 @@ function migrationCard(preview){const name=applicationInfo(preview.application).
 async function showMigration(application){const t=currentTask();if(!t)return;if(!safeToRefocus())return notice('Finish your current thought before previewing an import.');setBusy(true);try{importPreview=await api('migration/preview',{taskId:t.id,application,projectId:$('#migration-project')?.value || t.projectId});present({title:'Bring this conversation into Lounge?',body:'Review what will carry over. This creates a linked continuation and starts no work until you give it a new instruction.',spoken:'',migrationPreview:importPreview,advance:false},t,{read:false});$('#scene-actions').innerHTML='<button class="primary-action" data-action="confirm-import">Confirm import ↗</button><button data-action="cancel-import">Keep using the source</button>';}catch(error){notice(error.message);}finally{setBusy(false);}}
 function present(scene, task, {read=true,onEnd,narrate=false,next=false}={}) {
   scene=normalizeScene(scene.briefing?taskBrief(scene,task?{...task,briefedAt:task.briefedAt||presentedTasks.has(task.id)}:task):scene);
-  document.body.classList.toggle('room-entry',!!scene.entry);$('#next-task').hidden=!!scene.entry;
-  currentScene=scene;$('#welcome').hidden=true;$('#transition').hidden=true;$('#scene').hidden=false;$('#scene').scrollTop=0;
+  document.body.classList.toggle('room-entry',!!scene.entry);$('#next-task').hidden=!!scene.entry||dictationHold.held;
+  currentScene=scene;renderPlaybackHold();$('#welcome').hidden=true;$('#transition').hidden=true;$('#scene').hidden=false;$('#scene').scrollTop=0;renderPresence();
   $('.scene-meta').hidden=!task||task.isConductor;
   $('#scene-project').textContent=task?projectName(task):'';
   $('#scene-kind').textContent=task?`${applicationInfo(task).name} · ${stateLabel(task)}`:(scene.needsReply?'A question for you':'One thought at a time');
   $('#scene-title').textContent=scene.title;$('#scene-body').innerHTML=markdown(scene.body);
-  const batch=scene.artifactBatch||(task?.isConductor?task.artifactBatch:null);
-  $('#scene-artifacts').innerHTML=batch?`<p class="artifact-heading">${batch.candidates.length?'Chats I found':'No matching chats found'}</p>`+batch.candidates.map(c=>{const url=sourceUrl({application:c.application||batch.application||'codex',threadId:c.id,external:true});return `<article class="artifact-card"><h3>${esc(c.title)}</h3><p>${esc(c.preview)}</p><small>${esc(c.cwd?.split('/').pop()||applicationInfo(c.application||batch.application||'codex').name)} · ${batch.importedIds?.includes(c.id)?'Added to your queue':esc(applicationInfo(c.application||batch.application||'codex').name)}</small>${url?`<br><a href="${esc(url)}">View source ↗</a>`:''}</article>`;}).join(''):'';
+  const batch=scene.artifactBatch||null;
+  $('#scene-artifacts').innerHTML=batch?`<p class="artifact-heading">${batch.unavailableReason?'ChatGPT search isn’t connected':batch.candidates.length?'Chats I found':'No matching chats found'}</p>`+batch.candidates.map(c=>{const url=sourceUrl({application:c.application||batch.application||'codex',threadId:c.id,external:true});return `<article class="artifact-card"><h3>${esc(c.title)}</h3><p>${esc(chatDescription(c))}</p><small>${c.cwd?`Workspace: ${esc(c.cwd.split('/').pop())} · `:''}${batch.importedIds?.includes(c.id)?'Added to your queue':esc(applicationInfo(c.application||batch.application||'codex').name)}</small>${url?`<br><a href="${esc(url)}">View source ↗</a>`:''}</article>`;}).join(''):'';
   if(!batch&&task?.capabilities?.bridged)$('#scene-artifacts').innerHTML=(task.artifacts||[]).filter(a=>{try{const url=new URL(a.url);return url.protocol==='https:'&&url.hostname==='claude.ai'&&!url.username&&!url.password;}catch{return false;}}).map(a=>`<article class="artifact-card"><h3>${esc(a.title)}</h3><a href="${esc(a.url)}">View in Claude ↗</a></article>`).join('');
   if(scene.choices?.length)$('#scene-artifacts').innerHTML+='<div class="brief-choices">'+scene.choices.map((c,i)=>`<article class="brief-choice"><h3>Option ${i+1} · ${esc(c.label)}</h3>${markdown(c.quote)}</article>`).join('')+'</div>';
   else if(scene.choiceExcerpt)$('#scene-artifacts').innerHTML+=`<article class="brief-choice"><h3>Options from the source</h3>${markdown(scene.choiceExcerpt)}</article>`;
@@ -281,7 +307,7 @@ function present(scene, task, {read=true,onEnd,narrate=false,next=false}={}) {
   if(read){const text=narrate?briefingNarration(scene,task,{name:state.profile.name||'',first:firstBrief,next:!firstBrief&&next,returning:!!scene.returning}):scene.spoken||scene.body;if(task&&narrate)firstBrief=false;currentScene.readAloud=text;speak(text,onEnd);}
   if(narrate&&task&&!task.isConductor){presentedTasks.add(task.id);task.briefedAt ||= new Date().toISOString();api(`tasks/${task.id}/presented`,{version:task.attentionVersion}).catch(()=>{});}
   warmUpcoming();
-  if(session&&!document.body.classList.contains('drawer-open'))$('#thought').focus({preventScroll:true});
+  if(session&&!document.body.classList.contains('drawer-open'))($('#thought').value.trim()?$('#thought'):$('#room')).focus({preventScroll:true});
 }
 async function fetchState(){const next=await api('state');token=next.token;state=next;overlaySettings();renderChrome();return state;}
 async function refreshLoaded(){const next=await api('session/refresh',{});state={...state,...next};overlaySettings();renderChrome();if(next.refreshErrors?.length)notice('Some source chats could not be refreshed. Their saved context is still here.');}
@@ -321,8 +347,8 @@ function openEntry(mode='greeting',{read=true}={}){
   session=true;queueStarted=false;currentId=null;$('#thought-area').hidden=false;restoreDraft();closeDrawer();renderChrome();
   present(entryScene(state.profile.name,mode),null,{read});
 }
-function startSession(){if(session||busy)return;openEntry();if(!state.profile.autoRead)notice('Read-aloud is muted. Use the sound control to hear the greeting.');}
-function clearSentDraft(key,text){if((drafts[key]?.text||'').trim()===text){delete drafts[key];localStorage.setItem('lounge-room-drafts',JSON.stringify(drafts));if((currentId||'conductor')===key){$('#thought').value='';lastValue='';resizeThought();}}}
+function startSession(){if(session||busy||dictationHold.keyDown)return;completeDictation();openEntry();if(!state.profile.autoRead)notice('Read-aloud is muted. Use the sound control to hear the greeting.');}
+function clearSentDraft(key,text){if((drafts[key]?.text||'').trim()===text){delete drafts[key];localStorage.setItem('lounge-room-drafts',JSON.stringify(drafts));if((currentId||'conductor')===key){$('#thought').value='';lastValue='';resizeThought();if(document.activeElement===$('#thought'))$('#room').focus({preventScroll:true});}}}
 async function sendThought() {
   if(busy||!session)return;clearTimeout(autoSendTimer);clearTimeout(advanceTimer);if(recording){voiceSession.forceSubmit=true;stopMic(true);return;}
   const task=currentTask(), key=currentId||'conductor';
@@ -331,7 +357,8 @@ async function sendThought() {
   if(!text)return;
   if(pendingConductor&&state.tasks.find(t=>t.id===pendingConductor)?.status==='review'){notice('Review the response before sending this thought. Your draft stays saved.');return;}
   if(pendingConductor&&currentId!==pendingConductor&&state.tasks.find(t=>t.id===pendingConductor)?.pending.length){notice('A new question is waiting. Choose “Hear the question” before answering it. Your current thought stays saved.');return;}
-  persistDraft();const binding=drafts[key]?.binding;
+  if(dictationHold.held&&dictationHold.snapshot.key!==key){notice('Finish dictation or resume before sending to a different task.');return;}
+  persistDraft();const held=completeDictation();if(!bindDictationCommit(held))return;const binding=drafts[key]?.binding;
   try{if(binding)assertDraftTarget(binding,task||conductor());}catch(error){notice(error.message);return;}
   stopSpeaking();
   const intent=entryIntent(text);
@@ -339,22 +366,21 @@ async function sendThought() {
   if(!task&&intent){clearSentDraft(key,text);openEntry(intent);return;}
   if(/^(next( task)?|move on|what[’']?s next|skip this)[.!?]?$/i.test(text)){clearSentDraft(key,text);await nextTask();return;}
   if(/^(open( this| the task)?|open (in )?(codex|chatgpt|claude))[.!?]?$/i.test(text)&&sourceUrl(task||{})){clearSentDraft(key,text);const link=$('#scene-actions a');if(link)link.click();return;}
-  const submission={id:crypto.randomUUID(),key,text,cancelled:false,sent:false};activeSubmission=submission;setBusy(true);$('#input-hint').textContent='Thinking it through.';
+  const submission={id:crypto.randomUUID(),key,text,cancelled:false,sent:false};activeSubmission=submission;setBusy(true);$('#input-hint').textContent='Thinking';showTransition('Thinking','');speak(immediateAcknowledgement(text));
   try{
     await inferenceSaver.flush();if(inferenceSaver.error)throw new Error('The model preference has not saved. Retry it in Settings before starting the next turn.');
     if(submission.cancelled)return;submission.sent=true;
     const result=await api('conductor',{commandId:submission.id,text,taskId:task?.id,requestId:task?.pending[0]?.id||null,briefKey:currentScene?.briefKey||null});if(submission.cancelled)return;clearSentDraft(key,text);pendingConductor=result.id;
-    showTransition('Thinking it through.','Your thought is with me.');
     await fetchState();consumeConductor();
-  }catch(error){if(submission.cancelled)return;activeSubmission=null;setBusy(false);if(error.message.includes('coordinator question'))await fetchState().catch(()=>{});notice(error.message);}
-  finally{if(!submission.cancelled)$('#input-hint').textContent='Your dictation shortcut works here.';}
+  }catch(error){if(submission.cancelled)return;activeSubmission=null;setBusy(false);if(error.message.includes('coordinator question'))await fetchState().catch(()=>{});if(currentScene)present(currentScene,currentTask(),{read:false});notice(error.message);}
+  finally{if(!submission.cancelled)$('#input-hint').textContent='Paste here to edit. Paste elsewhere to send.';}
 }
 function consumeConductor(){
   if(cancellingThought||activeSubmission?.cancelled)return;
   if(!pendingConductor)return;const t=state.tasks.find(t=>t.id===pendingConductor);if(!t)return;
   if(t.status==='waiting'&&t.pending.length){
     queuedPaste=false;cancelAutoSend();setBusy(false);
-    if($('#thought').value.trim()||recording){
+    if($('#thought').value.trim()||recording||dictationHold.held){
       offerResponseReview(()=>{if(recording)stopMic(false);showConductorQuestion(t);});
       if(!$('#hear-question'))$('#scene-actions').insertAdjacentHTML('beforeend','<button id="hear-question" class="primary-action">Hear the question ↗</button>');
       $('#hear-question').onclick=()=>{if(recording)stopMic(false);showConductorQuestion(t);};
@@ -364,18 +390,18 @@ function consumeConductor(){
   }
   if(t.status==='error'||t.status==='paused'){activeSubmission=null;pendingConductor=null;setBusy(false);present({title:'Let’s keep your place.',body:t.lastError||'The connection paused. Your thought is saved in this conversation.',spoken:'',needsReply:false,advance:false},currentTask(),{read:false});return;}
   if(t.status!=='review'||!t.summary)return;
-  if(($('#thought').value.trim()||recording)&&!t.resultAccepted){queuedPaste=false;cancelAutoSend();setBusy(false);offerResponseReview(()=>{persistDraft();if(recording)stopMic(false);consumeConductorResult(t);});if(!$('#hear-result'))$('#scene-actions').insertAdjacentHTML('beforeend','<button id="hear-result" class="primary-action">Review the response ↗</button>');$('#hear-result').onclick=()=>{persistDraft();if(recording)stopMic(false);consumeConductorResult(t);};notice('A response is ready. Your current thought stays saved.');return;}
+  if(($('#thought').value.trim()||recording||dictationHold.held)&&!t.resultAccepted){queuedPaste=false;cancelAutoSend();setBusy(false);offerResponseReview(()=>{persistDraft();if(recording)stopMic(false);consumeConductorResult(t);});if(!$('#hear-result'))$('#scene-actions').insertAdjacentHTML('beforeend','<button id="hear-result" class="primary-action">Review the response ↗</button>');$('#hear-result').onclick=()=>{persistDraft();if(recording)stopMic(false);consumeConductorResult(t);};notice('A response is ready. Your current thought stays saved.');return;}
   consumeConductorResult(t);
 }
-function offerResponseReview(action){if($('#transition').hidden)return;$('#transition-text').textContent='A response is ready.';$('#transition-subtext').textContent='Your thought is held. Review before continuing.';$('.thinking-orbit').hidden=true;$('#review-response').hidden=false;$('#review-response').onclick=action;}
+function offerResponseReview(action){if($('#transition').hidden)return;$('#transition-text').textContent='A response is ready.';$('#transition-subtext').textContent='Your thought is held. Review before continuing.';renderPresence();$('#review-response').hidden=false;$('#review-response').onclick=action;}
 function consumeConductorResult(t){
-  activeSubmission=null;pendingConductor=null;setBusy(false);const scene=parseScene(t.summary);
+  activeSubmission=null;pendingConductor=null;setBusy(false);let scene=parseScene(t.summary);const previewActive=t.routingContext?.actions?.some(a=>['lounge_find_chats','lounge_preview_current_chat'].includes(a.tool))&&!t.routingContext?.actions?.some(a=>a.tool==='lounge_import_chats');if(previewActive&&t.artifactBatch?.candidates.length)scene={...scene,...importPreviewScene(t.artifactBatch,{question:scene.title,context:scene.body}),transition:'stay'};
   const decision=transitionDecision(scene,{instruction:t.routingContext?.userInstruction,actions:t.routingContext?.actions,activeTaskIds:state.tasks.filter(t=>t.status==='running'&&!t.isConductor).map(t=>t.id)});
   if(decision==='ask'){scene.body=[scene.body,'Stay here or move to the next task?'].filter(Boolean).join('\n\n');scene.spoken=[scene.spoken,'Stay here or move to the next task?'].filter(Boolean).join(' ');scene.needsReply=true;}
   pendingAutoAdvance=decision==='next'&&state.profile.autoAdvance;
   const moveOn=()=>{if(pendingAutoAdvance&&safeToRefocus()){pendingAutoAdvance=false;nextTask();}};
   const created=t.routingContext?.actions?.findLast(a=>a.tool==='lounge_capture'&&a.taskId);if(decision==='stay'&&created){persistDraft();currentId=created.taskId;restoreDraft();}
-  present({...scene,artifactBatch:t.artifactBatch,migrationPreview:t.migrationPreview,taskPlan:t.taskPlan?.status==='proposed'||t.routingContext?.actions?.some(a=>a.tool==='lounge_confirm_plan')?t.taskPlan:null},currentTask(),{onEnd:pendingAutoAdvance?moveOn:undefined});
+  present({...scene,artifactBatch:t.routingContext?.actions?.some(a=>['lounge_find_chats','lounge_import_chats','lounge_preview_current_chat'].includes(a.tool))?t.artifactBatch:null,migrationPreview:t.migrationPreview,taskPlan:t.taskPlan?.status==='proposed'||t.routingContext?.actions?.some(a=>a.tool==='lounge_confirm_plan')?t.taskPlan:null},currentTask(),{onEnd:pendingAutoAdvance?moveOn:undefined});
 }
 function taskPlanCard(plan){
   if(plan.status==='discarded')return'';
@@ -388,8 +414,8 @@ document.addEventListener('click',async e=>{
   try{if(button.dataset.confirmPlan){const plan=await api('plans/confirm',{planId:button.dataset.confirmPlan});await fetchState();present({title:'Your queue is ready.',body:`Added ${plan.items.length} tasks. What would you like to work on first?`,spoken:`Added ${plan.items.length} tasks to your queue. What would you like to work on first?`,taskPlan:plan,needsReply:true,advance:false},currentTask());}else{await api('plans/discard',{planId:button.dataset.discardPlan});await fetchState();present({title:'Proposal set aside.',body:'Tell me how you’d like to split the work instead.',spoken:'Proposal set aside. How would you like to split the work?',needsReply:true,advance:false},currentTask());}}
   catch(error){notice(error.message);}finally{setBusy(false);if(button.isConnected)button.disabled=false;}
 });
-function showConductorQuestion(t){activeSubmission=null;pendingConductor=null;persistDraft();currentId=t.id;restoreDraft();const p=t.pending[0];present({title:p.question,body:p.context||'Take your time. I’m listening to the whole thought.',spoken:p.question,needsReply:true,advance:false},t);}
-function scheduleSend(){clearTimeout(autoSendTimer);if(!state.profile.autoSend||recording)return;if(busy){queuedPaste=true;return;}$('#input-hint').textContent='Thought received. Sending…  ·  Esc to hold';autoSendTimer=setTimeout(()=>{autoSendTimer=null;$('#input-hint').textContent='Your dictation shortcut works here.';sendThought();},650);}
+function showConductorQuestion(t){activeSubmission=null;pendingConductor=null;persistDraft();currentId=t.id;restoreDraft();const p=t.pending[0],preview=p.importBatchId===t.artifactBatch?.id?importPreviewScene(t.artifactBatch,{question:p.question,context:p.context}):null;present(preview?{...preview,artifactBatch:t.artifactBatch}:{title:p.question,body:p.context||'Take your time. I’m listening to the whole thought.',spoken:p.question,needsReply:true,advance:false},t);}
+function scheduleSend(){clearTimeout(autoSendTimer);if(!state.profile.autoSend||recording||dictationHold.held)return;if(busy){queuedPaste=true;return;}$('#input-hint').textContent='Thought received. Sending…  ·  Esc to hold';autoSendTimer=setTimeout(()=>{autoSendTimer=null;$('#input-hint').textContent='Paste here to edit. Paste elsewhere to send.';sendThought();},650);}
 function cancelAutoSend(){clearTimeout(autoSendTimer);autoSendTimer=null;pendingAutoAdvance=false;clearTimeout(advanceTimer);$('#input-hint').textContent='Take your time. Enter when you’re ready.';}
 function renderThoughtControl(){
   const coordinator=conductor(),stoppable=!!activeSubmission||!!pendingConductor||!!(currentTask()?.isConductor&&['running','waiting'].includes(coordinator?.status));
@@ -420,13 +446,45 @@ async function stopThought(){
   finally{cancellingThought=false;settleStopFromState();renderThoughtControl();$('#input-hint').textContent=stopAwaiting?'Stop requested. Waiting for the runtime.':'Held for review. Enter when you’re ready.';}
 }
 $('#stop-thought').onclick=stopThought;
-function pauseForDictation(){stopSpeaking();cancelAutoSend();$('#input-hint').textContent='Playback paused. Finish your thought; your dictation app handles recording.';}
+function renderPlaybackHold(){
+  $('#resume-playback').hidden=!dictationHold.held;$('#resume-playback').disabled=busy||recording||dictationHold.keyDown;
+  $('#next-task').hidden=!!currentScene?.entry||dictationHold.held;renderPresence();
+}
+function pauseForDictation(){
+  const task=currentTask()||conductor(),snapshot=playback?{...playback,profile:{...playback.profile},offset:voiceAudio?.currentTime??playbackPosition(playback,audioContext?.currentTime),startedAt:null}:null;
+  dictationHold.press({key:currentId||'conductor',prefix:$('#thought').value,binding:{taskId:task?.id||null,requestId:task?.pending[0]?.id||null},playback:snapshot});
+  stopSpeaking();queuedPaste=false;cancelAutoSend();renderPlaybackHold();$('#input-hint').textContent='Paused for dictation. Paste your thought, or resume after cancelling.';
+}
+function completeDictation(){const held=dictationHold.complete();renderPlaybackHold();return held;}
+function bindDictationCommit(held){
+  if(!held)return true;
+  const key=currentId||'conductor';
+  if(key!==held.key){notice('Finish dictation or resume before changing its target.');return false;}
+  if(drafts[key]){drafts[key].binding={...held.binding,...(key==='conductor'&&!held.binding.taskId?{taskId:conductor()?.id||null}:{})};localStorage.setItem('lounge-room-drafts',JSON.stringify(drafts));}
+  return true;
+}
+function stashDictationCommit(held,text){
+  const prefix=held.prefix||'';drafts[held.key]={text:prefix+(prefix.trim()&&text.trim()?'\n':'')+text,binding:held.binding};
+  localStorage.setItem('lounge-room-drafts',JSON.stringify(drafts));notice('Your dictated thought is held with the task where you started. Review it there before sending.');
+}
+function resumeReadAloud(){
+  if(!dictationHold.held||dictationHold.keyDown||busy||recording)return;
+  const held=completeDictation(),saved=held?.playback,sameScene=saved?.scene===currentScene;
+  const text=sameScene?saved.text:currentScene?.readAloud||currentScene?.spoken;
+  const sameVoice=sameScene&&['voiceProvider','naturalVoiceId','voiceName','voiceRate','voiceTone'].every(key=>saved.profile[key]===state.profile[key]);
+  cancelAutoSend();unlockAudio();$('#input-hint').textContent='Paste here to edit. Paste elsewhere to send.';
+  // Resume reading only; a previously scheduled next-task callback stays cancelled.
+  if(text)speak(text,undefined,state.profile,sameVoice?{buffer:saved.buffer,offset:saved.offset,charIndex:saved.charIndex}:{});
+  else notice('Ready for your next thought.');
+}
+$('#resume-playback').onclick=resumeReadAloud;
+
 function syncNativeShortcut(){window.webkit?.messageHandlers?.loungeShell?.postMessage({action:'dictationShortcut',code:state.profile.dictationShortcut?.code||'',capture:shortcutCapture?'1':'0'});}
 function renderDictationShortcut(){
   $('#dictation-shortcut').textContent=shortcutCapture?'Press your dictation shortcut…':shortcutLabel(state.profile.dictationShortcut,isMac);
   $('#dictation-shortcut').dataset.capturing=String(shortcutCapture);$('#dictation-shortcut').setAttribute('aria-label',shortcutCapture?'Press your dictation shortcut; Escape cancels':'Change dictation shortcut: '+shortcutLabel(state.profile.dictationShortcut,isMac));$('#clear-dictation-shortcut').textContent=shortcutCapture?'Cancel':'Clear';
 }
-function finishShortcut(shortcut){shortcutCapture=false;shortcutModifier=null;syncNativeShortcut();savePreference({dictationShortcut:validateShortcut(shortcut)});renderDictationShortcut();}
+function finishShortcut(shortcut){dictationHold.releaseKey();renderPlaybackHold();shortcutCapture=false;shortcutModifier=null;syncNativeShortcut();savePreference({dictationShortcut:validateShortcut(shortcut)});renderDictationShortcut();}
 function observeShortcut(raw){
   const event=shortcutEvent(raw);if(!event)return;
   if(shortcutCapture){
@@ -434,30 +492,38 @@ function observeShortcut(raw){
     if(isModifierCode(event.code)&&event.code!=='Fn'){if(event.pressed)shortcutModifier=event;else if(shortcutModifier?.code===event.code)finishShortcut(shortcutModifier);return;}
     if(event.pressed){try{finishShortcut(event);}catch(error){notice(error.message);}}return;
   }
-  if(matchesShortcut(state.profile.dictationShortcut,event))pauseForDictation();
+  if(matchesShortcut(state.profile.dictationShortcut,event))pauseForDictation();else if(!event.pressed&&event.code===state.profile.dictationShortcut?.code){dictationHold.releaseKey();renderPlaybackHold();}
 }
 $('#dictation-shortcut').onclick=()=>{stopSpeaking();cancelAutoSend();shortcutCapture=!shortcutCapture;shortcutModifier=null;syncNativeShortcut();renderDictationShortcut();};
 $('#clear-dictation-shortcut').onclick=()=>finishShortcut(shortcutCapture?state.profile.dictationShortcut:null);
 for(const type of ['keydown','keyup'])document.addEventListener(type,e=>{if(shortcutCapture){e.preventDefault();e.stopImmediatePropagation();}observeShortcut(e);},true);
 document.addEventListener('lounge:dictation-key',e=>observeShortcut(e.detail));
-$('#thought').addEventListener('input',e=>{if(speechActive)stopSpeaking();pendingAutoAdvance=false;clearTimeout(advanceTimer);persistDraft();resizeThought();const inserted=Math.max(e.data?.length||0,$('#thought').value.length-lastValue,0);lastValue=$('#thought').value;if(isDictationCommit({inputType:e.inputType,insertedLength:inserted,isComposing:e.isComposing,pasted:Date.now()-lastPasteAt<150,manualKeyRecent:Date.now()-lastManualKeyAt<100}))scheduleSend();else cancelAutoSend();});
+$('#thought').addEventListener('input',e=>{
+  const before=lastValue;if(speechActive)stopSpeaking();pendingAutoAdvance=false;clearTimeout(advanceTimer);persistDraft();resizeThought();
+  const inserted=Math.max(e.data?.length||0,$('#thought').value.length-lastValue,0);lastValue=$('#thought').value;
+  if(isDictationCommit({inputType:e.inputType,insertedLength:inserted,isComposing:e.isComposing,pasted:Date.now()-lastPasteAt<150,manualKeyRecent:Date.now()-lastManualKeyAt<100})){
+    const held=completeDictation();if(held&&held.key!==(currentId||'conductor')){stashDictationCommit(held,e.data||$('#thought').value);$('#thought').value=before;lastValue=before;persistDraft();resizeThought();return;}bindDictationCommit(held);
+  }
+  cancelAutoSend();
+});
 $('#thought-form').onsubmit=e=>{e.preventDefault();sendThought();};
 $('#thought').addEventListener('keydown',e=>{if(e.key.length===1&&!e.metaKey&&!e.ctrlKey&&!e.altKey)lastManualKeyAt=Date.now();if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendThought();}});
 function textTarget(target){return target?.closest('input,textarea,select,[contenteditable="true"]');}
 // Wispr's own shortcut stays with Wispr; the browser receives its finished text.
 // Do not guess the function-key timing or send while dictation is in flight.
 function onPaste(e){
-  if(!acceptsRoomPaste({inDrawer:!!e.target.closest?.('#drawer'),editable:!!textTarget(e.target),thought:e.target===$('#thought')}))return;
+  const disposition=pasteDisposition({inDrawer:!!e.target.closest?.('#drawer'),editable:!!textTarget(e.target),thought:e.target===$('#thought')});if(disposition==='ignore')return;
   const text=e.clipboardData?.getData('text/plain');if(!text)return;
   unlockAudio();lastPasteAt=Date.now();
   if(!session){session=true;$('#thought-area').hidden=false;$('#welcome').hidden=true;renderChrome();present({title:'I’m listening.',body:'',spoken:'',needsReply:false,advance:false},null,{read:false});}
   // Capture once at the window boundary, including pastes onto buttons/body.
-  e.preventDefault();stopSpeaking();const field=$('#thought'),a=field.selectionStart??field.value.length,b=field.selectionEnd??a;
+  e.preventDefault();stopSpeaking();const held=completeDictation(),field=$('#thought'),a=field.selectionStart??field.value.length,b=field.selectionEnd??a;
+  if(held&&held.key!==(currentId||'conductor')){stashDictationCommit(held,text);return;}
   const inThought=e.target===field;field.value=inThought?field.value.slice(0,a)+text+field.value.slice(b):field.value+(field.value.trim()?'\n':'')+text;
-  lastValue=field.value;field.focus();if(inThought)field.setSelectionRange(a+text.length,a+text.length);persistDraft();resizeThought();scheduleSend();
+  lastValue=field.value;field.focus();if(inThought)field.setSelectionRange(a+text.length,a+text.length);persistDraft();resizeThought();if(bindDictationCommit(held)&&disposition==='submit')scheduleSend();else cancelAutoSend();
 }
 function finishVoice(voice, unexpected=false){
-  if(voice.finished)return;voice.finished=true;recording=false;
+  if(voice.finished)return;voice.finished=true;recording=false;completeDictation();
   $('#mic').disabled=false;$('#mic').classList.remove('listening');$('#mic').setAttribute('aria-label','Start dictation');
   const key=voice.target||'conductor',sameTarget=(currentId||'conductor')===key;
   const base=sameTarget?$('#thought').value:(drafts[key]?.text||voice.prefix);
@@ -466,7 +532,7 @@ function finishVoice(voice, unexpected=false){
     drafts[key]={text,binding:voice.binding};localStorage.setItem('lounge-room-drafts',JSON.stringify(drafts));
     if(sameTarget){$('#thought').value=text;lastValue=text;resizeThought();}
   }
-  $('#input-hint').textContent='Your dictation shortcut works here.';
+  $('#input-hint').textContent='Paste here to edit. Paste elsewhere to send.';
   if(voice.forceSubmit&&sameTarget)sendThought();
   else if(voice.submit&&state.profile.autoSend&&sameTarget)scheduleSend();
   else if(unexpected)notice('Dictation paused. Your words are saved. Finish your thought, then press Enter.');
@@ -480,10 +546,10 @@ function stopMic(submit=true){
 $('#mic').onclick=()=>{
   if(recording)return stopMic();
   const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!Speech){$('#thought').focus();return notice('Use your Wispr Flow shortcut here. The completed thought will send automatically.');}
-  stopSpeaking();recognition=new Speech();recognition.continuous=true;recognition.interimResults=false;recognition.lang='en-US';
+  if(!Speech){$('#thought').focus();return notice('Use your Wispr Flow shortcut here. Paste outside the text box to send, or press Enter after editing.');}
+  const heldDictation=dictationHold.snapshot;stopSpeaking();recognition=new Speech();recognition.continuous=true;recognition.interimResults=false;recognition.lang='en-US';
   const task=currentTask()||conductor();
-  const voice={target:currentId,prefix:$('#thought').value,words:'',submit:false,stopping:false,finished:false,recognition,binding:{taskId:task?.id||null,requestId:task?.pending[0]?.id||null}};
+  const voice={target:currentId,prefix:$('#thought').value,words:'',submit:false,stopping:false,finished:false,recognition,binding:heldDictation?.binding||{taskId:task?.id||null,requestId:task?.pending[0]?.id||null}};
   voiceSession=voice;
   recognition.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)voice.words+=e.results[i][0].transcript+' ';if(!voice.stopping)$('#input-hint').textContent='Listening. Finish your thought, then tap to stop.';};
   recognition.onerror=e=>{voice.submit=false;voice.forceSubmit=false;notice(`Dictation stopped: ${e.error}. Your words stay saved.`);finishVoice(voice);};
@@ -589,7 +655,7 @@ if(action==='refresh'){if(safeToRefocus())await focusTask(t.id,{refresh:false});
 if(action==='open-claude'){if(window.webkit?.messageHandlers?.loungeShell)window.webkit.messageHandlers.loungeShell.postMessage({action:'openClaude'});else notice('Open Claude → Code and use /resume to select the saved session shown here.');}
 if(action==='clear'){await removeTask(t.id);}if(action==='later'){await api(`tasks/${t.id}/snooze`,{hours:4});await nextTask();}if(action==='approve'||action==='decline'){await api(`tasks/${t.id}/answer`,{requestId:t.pending[0].id,decision:action==='approve'?'accept':'decline'});await nextTask();}if(action==='interrupt'){await api(`tasks/${t.id}/interrupt`,{});notice('I’ve asked the agent to pause.');}}}catch(error){notice(error.message);}finally{if(el.isConnected)el.disabled=false;}});
 document.addEventListener('paste',onPaste);
-document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key===','){e.preventDefault();openDrawer(true);settings(true);return;}if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.code==='KeyP'){e.preventDefault();changeRotation(state.rotationMode==='work'?'all':'work');return;}if(e.key==='Escape'){cancelAutoSend();stopSpeaking();if(recording)stopMic(false);if(document.body.classList.contains('drawer-open'))closeDrawer();return;}if(e.code==='Space'&&!session&&!textTarget(e.target)&&!document.body.classList.contains('drawer-open')){e.preventDefault();startSession();return;}if((e.metaKey||e.ctrlKey)&&e.key==='\\'){e.preventDefault();if(document.body.classList.contains('drawer-open')&&$('#settings-view').hidden)closeDrawer();else{settings(false);openDrawer(true);}return;}if(session&&!textTarget(e.target)&&!document.body.classList.contains('drawer-open')&&e.key.length===1&&!e.metaKey&&!e.ctrlKey&&!e.altKey){$('#thought').focus();}});
+document.addEventListener('keydown',e=>{if(e.code==='Space'&&!e.repeat&&!e.isComposing&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!e.shiftKey&&canResumeReadAloud({held:dictationHold.held,keyDown:dictationHold.keyDown,session,busy,recording,drawer:document.body.classList.contains('drawer-open'),editing:!!textTarget(e.target)&&e.target!==$('#thought')||!!e.target.closest?.('button,a,summary')&&!e.target.closest?.('#resume-playback'),draft:$('#thought').value,answers:[...$('#scene-question').querySelectorAll('textarea,input:checked')].map(el=>el.value)})){e.preventDefault();resumeReadAloud();return;}if((e.metaKey||e.ctrlKey)&&e.key===','){e.preventDefault();openDrawer(true);settings(true);return;}if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.code==='KeyP'){e.preventDefault();changeRotation(state.rotationMode==='work'?'all':'work');return;}if(e.key==='Escape'){cancelAutoSend();stopSpeaking();if(recording)stopMic(false);if(document.body.classList.contains('drawer-open'))closeDrawer();return;}if(e.code==='Space'&&!session&&!textTarget(e.target)&&!document.body.classList.contains('drawer-open')){e.preventDefault();startSession();return;}if((e.metaKey||e.ctrlKey)&&e.key==='\\'){e.preventDefault();if(document.body.classList.contains('drawer-open')&&$('#settings-view').hidden)closeDrawer();else{settings(false);openDrawer(true);}return;}if(session&&!textTarget(e.target)&&!e.target.closest?.('button,a,summary')&&!document.body.classList.contains('drawer-open')&&e.key.length===1&&!e.metaKey&&!e.ctrlKey&&!e.altKey){$('#thought').focus();}});
 const isMac=/Mac|iPhone|iPad/.test(navigator.platform);
 for(const el of document.querySelectorAll('[data-shortcut]'))el.innerHTML=shortcutMarkup(el.dataset.shortcut,isMac);
 if(!isMac)for(const el of document.querySelectorAll('[title]'))el.title=el.title.replaceAll('Command','Control');
@@ -604,13 +670,13 @@ events.addEventListener('state',e=>{
   if(!maySurfaceQueue({session,queueStarted,busy,pendingConductor}))return;
   const old=currentId?previous.tasks.find(t=>t.id===currentId):null,t=currentTask();
   if(t&&!t.isConductor&&old&&inRotation(old,previous.rotationMode)&&!inRotation(t,state.rotationMode)){
-    if($('#thought').value.trim()||recording)return;
+    if($('#thought').value.trim()||recording||dictationHold.held)return;
     if(document.body.classList.contains('drawer-open'))return;
     nextTask({skipCurrent:false});return;
   }
   if(t&&currentScene?.saved&&t.cachedBrief?.key!==old?.cachedBrief?.key&&safeToRefocus()&&!speechActive){const target=currentId,run=generation;preparedScene(t).then(scene=>{if(currentId===target&&generation===run&&currentScene?.saved&&safeToRefocus()&&!speechActive)present(scene,t,{read:false});}).catch(()=>{});}
   if(t&&old&&fingerprint(old)!==fingerprint(t)){
-    if($('#thought').value.trim()||recording){notice('An update came back. Your thought stays where it is.');return;}
+    if($('#thought').value.trim()||recording||dictationHold.held){notice('An update came back. Your thought stays where it is.');return;}
     if(t.status==='waiting'&&t.pending.length){seen[t.id]=fingerprint(t);present({title:t.pending[0].question,body:t.pending[0].context||'Your answer will let this move forward.',spoken:t.pending[0].question,needsReply:true,advance:false},t);}
     else if(t.status==='review'){if(!speechActive&&!document.body.classList.contains('drawer-open'))focusTask(t.id,{refresh:false});else if(!$('#refresh-current')){$('#scene-actions').insertAdjacentHTML('beforeend','<button id="refresh-current" data-action="refresh">Hear the update ↗</button>');notice('An update is ready when you are.');}}
   }

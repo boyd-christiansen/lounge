@@ -32,7 +32,7 @@ Development data lives in ignored `data/`. The installed app uses `~/Library/App
 
 ## The interaction
 
-- Dictate with your existing Wispr shortcut. A completed paste into the focused room submits automatically; typing waits for Enter. Escape holds a pending submission. Microphone capture submits after an explicit stop, never after silence.
+- Dictate with your existing Wispr shortcut. A completed paste anywhere outside the text box submits automatically. Pasting into the text box stays editable so you can add a comment; press Enter to send. The room keeps focus between turns for dictation. Escape holds a pending submission. Microphone capture submits after an explicit stop, never after silence.
 - Start the queue to hear a prepared brief. Returning to a task emphasizes what changed and what needs deciding. Actual alternatives remain visible and are read aloud.
 - The queue is project-first: **P1, P2…**, then chats inside each project. Drag a project handle to move the whole group, or a chat handle to reorder inside that project. Alt+Up/Down also works. Disclosure bars collapse without pausing work. **Focus top task** selects the first eligible chat in project order. New results preserve the current draft and question.
 - Use a task’s **···** menu to mark it Work/Personal or Remove from queue. Removal has Undo and preserves the original conversation. Moving on never clears a task.
@@ -78,7 +78,7 @@ Shortcut keycaps are shown beside their controls: **⇧⌘P** toggles Work only/
 
 ## Dictation, stopping and planning
 
-Settings → Voice → **Dictation shortcut** records your existing dictation key. Fn/Globe is the Mac default; double-tap dictation stops playback on the first press. The binding only pauses Lounge playback while Lounge is focused; Wispr still owns recording and transcription. Native Fn/modifier events use an app-local monitor, with no systemwide keyboard capture. Browser previews support ordinary keyboard chords; Fn needs Lounge.app.
+Settings → Voice → **Dictation shortcut** records your existing dictation key. Fn/Globe is the Mac default; hold-to-talk and double-tap dictation pause playback on the first press. Releasing or tapping Fn again never resumes it. Completed text releases the pause without replaying the old message; if you cancel dictation, use Resume read-aloud or Space with an empty composer. The binding only pauses Lounge playback while Lounge is focused; Wispr still owns recording and transcription. Native Fn/modifier events use an app-local monitor, with no systemwide keyboard capture. Browser previews support ordinary keyboard chords; Fn needs Lounge.app.
 
 The composer shows **Stop** while the coordinator is thinking, including provider startup. A stopped thought stays selected for review or replacement and is never automatically resent. Stop interrupts that coordinator turn and blocks its later tool calls. Separate agents already dispatched continue running; completed actions are retained.
 
@@ -87,3 +87,8 @@ Briefings speak the summary and immediate decision. Exact alternatives and sourc
 For a brain dump, Lounge proposes a **queue plan** before adding tasks: project groups, task boundaries, priorities, project/chat positions and any workspace gaps. Revise it by voice, then approve by voice or with **Add tasks to queue**. Approval adds and orders the batch atomically; it starts no agents. Changed queues require a fresh preview, and repeated approval does not create duplicates. A new logical project can be organized before choosing its execution workspace; work cannot start until that workspace is assigned.
 
 [Queue-plan preview](docs/images/task-plan.jpg) · [Dictation setting](docs/images/dictation-shortcut.jpg)
+
+
+Lounge acknowledges a thought immediately while the coordinator works. A quiet white circle follows speech audio and pulses while Thinking; reduced-motion preferences are respected. Short acknowledgements are cached and do not add a second model turn.
+
+Conversation discovery searches local Codex titles plus bounded recent previews, with the actual search scope reported. Import previews survive later turns; a clear subsequent confirmation adds the selected conversation once. Workspace labels identify source folders, not platforms. Consumer ChatGPT desktop/web history is separate and is not exposed by the installed Codex app-server; Lounge reports that connection gap instead of claiming to have searched it. Desktop tools available inside the main app are not automatically inherited by standalone app-server clients.

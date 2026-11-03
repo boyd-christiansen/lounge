@@ -104,3 +104,14 @@ export function entryIntent(text = '') {
 export function maySurfaceQueue({ session = false, queueStarted = false, busy = false, pendingConductor = false } = {}) {
   return session && queueStarted && !busy && !pendingConductor;
 }
+
+// Composer pastes are editable drafts; the surrounding room is the dictation drop target.
+export function pasteDisposition(options={}) {
+  if(!acceptsRoomPaste(options))return 'ignore';
+  return options.thought?'draft':'submit';
+}
+export function immediateAcknowledgement(text='') {
+  if(/\b(?:find|search|look for|look up|locate|import|bring in)\b/i.test(text)&&/\b(?:chat|conversation|thread|chatgpt|claude|codex)\b/i.test(text))return 'I’ll look for that conversation.';
+  if(/\b(?:sort|reorder|prioriti[sz]e|snooze|personal projects|work only)\b/i.test(text))return 'Let me check your queue.';
+  return 'Let me think about that.';
+}

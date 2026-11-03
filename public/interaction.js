@@ -21,6 +21,24 @@ export function shortcutLabel(shortcut,mac=true){
   const key=shortcut.code==='Fn'?'Fn / Globe':isModifierCode(shortcut.code)?({ControlLeft:'Left Control',ControlRight:'Right Control',AltLeft:'Left Option',AltRight:'Right Option',ShiftLeft:'Left Shift',ShiftRight:'Right Shift',MetaLeft:'Left Command',MetaRight:'Right Command'})[shortcut.code]:shortcut.code.replace(/^Key|^Digit/,'');
   return[...shortcut.modifiers.map(m=>labels[m]),key].join(' + ');
 }
+// Fn release and further taps do not signal completion of external dictation.
+// Only a completed commit or an explicit resume releases the audio hold.
+export function createDictationHold(){
+  let snapshot=null,keyDown=false;
+  return{
+    get held(){return snapshot!==null;},get keyDown(){return keyDown;},get snapshot(){return snapshot;},
+    press(value){if(!snapshot)snapshot=value;keyDown=true;},releaseKey(){keyDown=false;},
+    complete(){const value=snapshot;snapshot=null;keyDown=false;return value;}
+  };
+}
+export function canResumeReadAloud({held=false,keyDown=false,session=false,busy=false,recording=false,drawer=false,editing=false,draft='',answers=[]}={}){
+  return held&&!keyDown&&session&&!busy&&!recording&&!drawer&&!editing&&!draft.trim()&&!answers.some(value=>String(value||'').trim());
+}
+export function playbackPosition(playback,at){
+  const offset=Number.isFinite(playback?.offset)?playback.offset:0;
+  const elapsed=Number.isFinite(playback?.startedAt)&&Number.isFinite(at)?Math.max(0,at-playback.startedAt):0;
+  return Math.max(0,offset+elapsed);
+}
 // Decisions use explicit intent and actual tool outcomes, rather than a model's
 // numeric confidence. A new task remains in focus even if work was dispatched.
 export function transitionDecision(scene,{actions=[],instruction='',activeTaskIds=[]}={}){
