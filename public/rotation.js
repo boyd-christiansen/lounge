@@ -1,4 +1,13 @@
 // Shared by the server and renderer so the drawer and next-task rotation agree.
+export const SORT_MODES=['recent','oldest','priority'];
+export function activityTime(task){
+  const times=[task.lastActivityAt,task.sourceUpdatedAt,task.messages?.at(-1)?.at].map(Date.parse).filter(Number.isFinite);
+  return times.length?Math.max(...times):(Date.parse(task.createdAt)||0);
+}
+export function compareTasks(a,b,sortMode='recent'){
+  if(sortMode==='priority')return (b.score||0)-(a.score||0)||activityTime(a)-activityTime(b)||String(a.id).localeCompare(String(b.id));
+  return (sortMode==='oldest'?1:-1)*(activityTime(a)-activityTime(b))||String(a.createdAt||'').localeCompare(String(b.createdAt||''))||String(a.id).localeCompare(String(b.id));
+}
 export const ROTATION_MODES = ['all', 'work', 'personal'];
 export function projectIdentity(task, projects = []) {
   const label = task.external ? task.sourceProjectName?.trim() : '';
@@ -32,15 +41,15 @@ export function mergeRotationOrder(tasks, ids, mode = 'all') {
 }
 
 // Project rank is the outer queue; the existing task order is local to a group.
-export function projectGroups(tasks, { mode = 'all', projectOrder = [], projects = [] } = {}) {
+export function projectGroups(tasks, { mode = 'all', projectOrder = [], projects = [], sortMode='recent' } = {}) {
   const groups = new Map();
   for (const task of rotationTasks(tasks, mode)) {
     const identity = projectIdentity(task, projects), key = task.projectKey || identity.key;
-    if (!groups.has(key)) groups.set(key, { key, name: task.projectName || identity.name, standalone: key.startsWith('task:'), tasks: [], score: -Infinity, position: groups.size });
-    const group = groups.get(key); group.tasks.push(task); group.score = Math.max(group.score, task.score || 0);
+    if (!groups.has(key)) groups.set(key, { key, name: task.projectName || identity.name, standalone: key.startsWith('task:'), tasks: [], score: -Infinity, activity:0, position: groups.size });
+    const group = groups.get(key); group.tasks.push(task); group.score = Math.max(group.score, task.score || 0);group.activity=Math.max(group.activity,activityTime(task));
   }
   const order = new Map(projectOrder.map((key, index) => [key, index]));
-  return [...groups.values()].sort((a,b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity) || b.score - a.score || a.position - b.position);
+  return [...groups.values()].sort((a,b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity) || (sortMode==='priority'?b.score-a.score:(sortMode==='oldest'?1:-1)*(a.activity-b.activity)) || a.position - b.position);
 }
 export function orderProjectTasks(tasks, options = {}) {
   const visible = projectGroups(tasks, options).flatMap(group => group.tasks), ids = new Set(visible.map(t => t.id));

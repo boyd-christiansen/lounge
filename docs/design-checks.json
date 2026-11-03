@@ -1,11 +1,11 @@
 {
   "checked": "2026-11-02",
   "delivery": {
-    "centerY": 398.5,
+    "centerY": 435,
     "fontSize": "13px",
     "height": 36,
     "left": 237.8984375,
-    "top": 380.5,
+    "top": 417,
     "width": 197.8984375
   },
   "fullscreen": {
@@ -25,20 +25,12 @@
     "width": 18
   },
   "pace": {
-    "centerY": 398.5,
+    "centerY": 435,
     "fontSize": "13px",
     "height": 36,
     "left": 24,
-    "top": 380.5,
+    "top": 417,
     "width": 197.8984375
-  },
-  "save": {
-    "centerY": 621,
-    "fontSize": "12px",
-    "height": 36,
-    "left": 24,
-    "top": 603,
-    "width": 411.796875
   },
   "sound": {
     "centerY": 44,
@@ -62,12 +54,12 @@
   },
   "tooltip": {
     "rowPositionsBefore": [
-      171,
-      238.34375
+      290,
+      357.34375
     ],
     "rowPositionsAfter": [
-      171,
-      238.34375
+      290,
+      357.34375
     ],
     "rowHeightsBefore": [
       64.34375,
@@ -85,7 +77,24 @@
     "screenshotScale": 2,
     "dropdownHeight": 36,
     "scrollingFormVerified": true,
-    "fixedSaveVerified": true,
-    "check": "manual installed-app check; no source content recorded"
+    "check": "manual installed-app check; no source content recorded",
+    "autosaveStatusVerified": true
+  },
+  "release": "0.6.0",
+  "autosave": {
+    "centerY": 84.25,
+    "fontSize": "11px",
+    "height": 16.5,
+    "left": 24,
+    "top": 76,
+    "width": 146.109375
+  },
+  "queueSort": {
+    "height": 36,
+    "top": 104
+  },
+  "queueFilter": {
+    "height": 36,
+    "top": 104
   }
 }

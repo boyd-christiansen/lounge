@@ -23,9 +23,9 @@ The old flat order treated each chat as an independent priority. The outer queue
 | Finding | Change | Check |
 | --- | --- | --- |
 | Project names repeated under every chat. | Show the project once in its heading. Chat rows contain title, application and current state. | Project and chat titles share a reading edge; project headings use stronger weight and their own quiet surface. |
-| A nearby chat could displace a more important project. | Persist project rank independently of chat order. Automatic project order uses the most urgent visible chat. | Tests cover multiple chats, running work, new results, reset and restarts. |
+| A nearby chat could displace a more important project. | Persist project rank independently of chat order. Named sorts explain recency, least recent activity or priority. Custom project rank overrides that base sort. | Tests cover multiple chats, running work, new results, reset and restarts. |
 | Reordering had only one level. | Project handles move whole groups; child handles reorder only within their project. Both support Alt+Up/Down. | Actual pointer drags and keyboard moves exercised at both levels; cross-project chat moves are rejected. |
-| Hover summaries expanded rows and moved nearby targets. | A separate context tooltip floats beside the drawer and also works on keyboard focus. | The two visible rows retained top positions 171px and 238.34px, and heights 64.34px, before/after the tooltip appeared. |
+| Hover summaries expanded rows and moved nearby targets. | A separate context tooltip floats beside the drawer and also works on keyboard focus. | The two visible rows retained top positions 290px and 357.34px, and heights 64.34px, before/after the tooltip appeared. |
 | Background refreshes rebuilt identical rows. | Skip replacing unchanged queue markup. | Focus and disclosure state survive unrelated updates. |
 | Collapse could be confused with deferral. | Persist disclosure state locally without changing task eligibility. | Focus top still selects a task inside a collapsed P1 project. |
 | Reorder could interrupt a response. | Apply priority immediately, but change the room’s focused task only when it has no draft, recording or pending exchange. | An unsent response remained attached to its original chat during a project reorder. |
@@ -41,9 +41,19 @@ The initial view presents four sections: Voice, Memory, Connections and Flow. On
 | The panel used many tiny labels, offsets and unrelated gaps. | Shared 24px gutters, 13px field text, 12px labels and 11px metadata; restrained neutral inks. | Fields and section headings use the same left edge. |
 | Pace, Delivery and Listen competed along an uneven baseline. | Equal-width Pace/Delivery fields with matching heights. Preview is a separate, aligned action. | Both select boxes are 36px high and share top and bottom edges. The native check found WebKit’s platform popup appearance ignored sizing; removing that appearance and using the pinned chevron fixes the native fields too. |
 | Connected status, disconnect and eligibility copy crowded the main voice choice. | Place them under ElevenLabs connection. Missing configuration/errors reveal that disclosure. | Connected and expanded-detail states inspected. |
-| Save disappeared below long settings. | A stable footer keeps Save visible while the form scrolls. | Save stays in place in Voice, Memory and Connections. |
-| Save looked actionable when nothing changed. | Disable it until a preference changes. Retain unsaved edits when the drawer closes. | Changed pace, reopened the drawer, saved and restored the synthetic preference. |
+| Manual Save was easy to overlook. | Save selections immediately and debounce text edits, with a quiet save status above the form. | Voice and pace survive reload; project notes remain attached to their project when switching immediately. |
+| Background replies could overwrite a newer edit. | Serialize field patches, overlay pending edits and retain failed edits locally with Retry. | Rapid-selection and failure/retry tests pass; stopping the synthetic server surfaces a visible error, and reload recovers the pending preference. |
 | Multiple expanded sections created a long inventory. | Native accordion grouping opens one primary section at a time. | Voice, Memory and Connections opening/closing checked. |
+
+## Sorts, states and shortcuts
+
+Order and Projects controls sit at the top of the queue on the same 36px field grid. At 1280×720 both begin at Y=104px, use the same width and share 24px outer gutters. The active order has a plain-language explanation beneath it. Selecting a named sort replaces custom project and chat positions atomically; dragging switches the label to Custom. A project stays together under every sort.
+
+Recency uses conversation messages or observed source changes, not import time when a source timestamp is known, and never cache/poll timestamps. Unknown source activity can only be dated when observed. Priority retains explicit urgency, due dates and aging rules.
+
+Queue labels distinguish pending questions, approvals, running work, finished turns, already-presented results, errors, pauses and unverifiable snapshots. The floating context tooltip explains the state. Presentation records the exact result version; a newer result returns to Ready for review. This never clears a task.
+
+Visible keycaps identify Shift-Command-P beside project filters, Command-comma beside Settings and Command-backslash beside Your queue. Controls have descriptive help for pace, delivery, dictation submission, transitions and prompt handoff. The hints state what the shortcut does rather than implying it cycles all three filters.
 
 ## Dimensions and evidence
 
@@ -55,7 +65,7 @@ Public screenshots use synthetic projects and a demo profile:
 - [Voice settings](images/voice-settings.jpg)
 - [Room](images/room.jpg)
 
-The native minimum-window check and final installed verification are recorded in [PROGRESS.md](PROGRESS.md). The fixed Save area and scrolling form are designed to keep controls reachable at that size.
+The native minimum-window check and final installed verification are recorded in [PROGRESS.md](PROGRESS.md). The save status and scrolling form keep controls reachable at that size; there is no routine Save button.
 
 ## Remaining limits
 

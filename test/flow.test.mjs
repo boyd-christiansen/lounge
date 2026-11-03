@@ -6,6 +6,7 @@ import { fingerprint, pickNext, sourceUrl, isDictationCommit, assertDraftTarget,
 
 test('manual queue order is explicit, durable, and resettable', () => {
   const s = new Store(':memory:'), a = s.create({ title: 'Urgent', priority: 'high' }), b = s.create({ title: 'User moved this first', priority: 'low' });
+  s.setMeta('settings',{sortMode:'priority'});
   s.reorder([b.id,a.id],0); assert.equal(s.snapshot()[0].id,b.id);
   assert.throws(()=>s.reorder([a.id,b.id],0),{status:409});
   assert.throws(()=>s.reorder([a.id,a.id],1),/Invalid queue order/);

@@ -1,12 +1,46 @@
 import { fingerprint, pickNext, sourceUrl, isDictationCommit, parseScene, normalizeScene, assertDraftTarget, queuePreview, renderMarkdown, briefingNarration, canRefocus, acceptsRoomPaste, taskBrief, entryScene, entryIntent, maySurfaceQueue } from './flow.js';
 import { icon } from './icons.js';
+import { createAutosave } from './autosave.js';
+import { taskState, shortcutMarkup } from './task-status.js';
 import { inRotation, rotationTasks, projectGroups } from './rotation.js';
 import { applicationInfo } from './applications.js';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeLoad = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } };
 let state = {tasks:[],projects:[],profile:{},connection:{},queueOrder:[],orderRevision:0}, token, session = false, currentId = null, currentScene = null, busy = false, speechActive = false, soundGeneration = 0, recognition, recording = false, voiceSession = null, pendingConductor = null, pendingAutoAdvance = false, generation = 0,managedQueueId=null;
-let settingsDirty=false,settingsEditVersion=0;
+const saveStates=new Map();
+const persistEdits=(key,value)=>{try{if(Object.keys(value).length)localStorage.setItem(key,JSON.stringify(value));else localStorage.removeItem(key);}catch{}};
+function saveStatus(key,status,error){
+  saveStates.set(key,{status,error});if(status==='error')notice('These changes haven’t saved. They are kept on this device; open Settings to retry.');
+  const failed=[...saveStates.values()].find(s=>s.status==='error'),saving=[...saveStates.values()].some(s=>s.status==='saving');
+  $('#settings-autosave').textContent=failed?'Not saved · '+failed.error.message:saving?'Saving…':'All changes saved';
+  $('#settings-autosave').classList.toggle('save-error',!!failed);$('#retry-settings').hidden=!failed;
+}
+const preferenceSaver=createAutosave({
+  initial:safeLoad('lounge-pending-preferences',{}),
+  save:patch=>api('profile',patch),persist:value=>persistEdits('lounge-pending-preferences',value),onStatus:(status,error)=>saveStatus('profile',status,error),
+  onSaved:profile=>{state.profile={...profile,...preferenceSaver.snapshot()};renderChrome();}
+});
+const noteSaver=createAutosave({
+  initial:safeLoad('lounge-pending-notes',{}),persist:value=>persistEdits('lounge-pending-notes',value),onStatus:(status,error)=>saveStatus('notes',status,error),
+  save:async notes=>{for(const [projectKey,text] of Object.entries(notes))await api('context',{scope:'project',projectKey,text});},
+  onSaved:(_result,notes)=>{state.projectContexts||={};for(const [key,text] of Object.entries({...notes,...noteSaver.snapshot()}))state.projectContexts[key]={...state.projectContexts[key],text};}
+});
+const inferenceSaver=createAutosave({
+  initial:safeLoad('lounge-pending-models',{}),persist:value=>persistEdits('lounge-pending-models',value),onStatus:(status,error)=>saveStatus('models',status,error),
+  save:async scopes=>{for(const [scope,selection] of Object.entries(scopes))await api('inference',{scope,...selection});},
+  onSaved:(_result,scopes)=>{state.inference={...state.inference,...scopes,...inferenceSaver.snapshot()};}
+});
+function overlaySettings(){
+  state.profile={...state.profile,...preferenceSaver.snapshot()};
+  state.inference={...state.inference,...inferenceSaver.snapshot()};
+  state.projectContexts||={};for(const [key,text] of Object.entries(noteSaver.snapshot()))state.projectContexts[key]={...state.projectContexts[key],text};
+}
+function savePreference(patch,debounce=false){
+  if(patch.voiceProvider==='elevenlabs'&&!state.speech?.ready){notice('Connect ElevenLabs before choosing natural speech.');$('#voice-provider').value=state.profile.voiceProvider||'system';return;}
+  const voiceChanged=['voiceProvider','naturalVoiceId','voiceTone','voiceRate','voiceName'].some(key=>key in patch&&patch[key]!==state.profile[key]);
+  state.profile={...state.profile,...patch};if(patch.autoRead===false)stopSpeaking();if(voiceChanged)resetVoicePlayback();preferenceSaver.update(patch,{debounce});renderChrome();
+}
 let drawerPinned = false, hoverTimer, closeTimer, noticeTimer, autoSendTimer, advanceTimer, dragId, lastPasteAt = 0, lastManualKeyAt = 0, lastValue = '';
 let voiceAudio = null, voiceAbort = null, voiceUrl = null, audioContext=null, audioSource=null, queuedPaste=false, firstBrief=true,queueStarted=false;
 const sceneCache=new Map(), audioCache=new Map(), audioErrors=new Set();let warming=false,greetingAudioWarmed=false,explicitVoiceRetry=false,voiceFailure=null;
@@ -41,7 +75,7 @@ const currentTask = () => state.tasks.find(t => t.id === currentId);
 const conductor = () => state.tasks.find(t => t.isConductor);
 const openTasks = () => rotationTasks(state.tasks, state.rotationMode);
 const projectName = t => t.sourceProjectName || state.projects.find(p => p.path === t.sourceCwd || p.id === t.projectId)?.name || 'Your work';
-const stateLabel = t => t.external && t.sourceTurnStatus === 'unknown' ? 'Source snapshot' : ({queued:'Ready when you are',running:'Working',waiting:'Needs you',review:'A result came back',paused:'Ready to pick up',error:'Needs a next step',snoozed:'Set aside'}[t.status] || 'In your queue');
+const stateLabel = t => taskState(t).label;
 const markdown = renderMarkdown;
 async function api(path, data) {
   const res = await fetch('/api/'+path, {method:data ? 'POST':'GET',headers:data ? {'Content-Type':'application/json','X-Lounge-Token':token}:{},body:data ? JSON.stringify({commandId:crypto.randomUUID(),...data}):undefined});
@@ -76,7 +110,7 @@ async function speak(text, onEnd, profile = state.profile) {
 }
 function renderChrome() {
   $('#hello').textContent=entryScene(state.profile.name).title;
-  $('#rotation-mode').value=state.rotationMode||'all';
+  $('#rotation-mode').value=state.rotationMode||'all';$('#queue-filter').value=state.rotationMode||'all';
   $('#codex-status').textContent=state.connection.state==='connected'?'Connected with your ChatGPT sign-in':'Use your existing ChatGPT sign-in';
   $('#connect-codex').textContent=state.connection.state==='connected'?'Reconnect ↗':'Connect ↗';
   const claude=state.runtimes?.find(r=>r.id==='claude-code');
@@ -91,15 +125,19 @@ function renderChrome() {
   offerConductorQuestion();
 }
 function offerConductorQuestion(){if(currentScene?.entry&&conductor()?.pending?.length&&!$('#waiting-question'))$('#scene-actions').insertAdjacentHTML('beforeend','<button id="waiting-question" data-entry="question">Hear waiting question ↗</button>');}
-function queueGroups(){return projectGroups(state.tasks,{mode:state.rotationMode,projectOrder:state.projectOrder||[],projects:state.projects});}
+function queueGroups(){return projectGroups(state.tasks,{mode:state.rotationMode,projectOrder:state.projectOrder||[],projects:state.projects,sortMode:state.sortMode});}
 function taskRow(t,{standalone=false,rank=0}={}){
-  const url=sourceUrl(t),drag=standalone?`data-drag-project="${esc(t.projectKey)}"`:`data-drag="${esc(t.id)}"`,copy=`<strong>${esc(t.title)}</strong><small><span class="task-status-dot ${esc(t.status)}"></span><span>${esc(applicationInfo(t).name)}</span><span aria-hidden="true">·</span><span>${esc(stateLabel(t))}</span>${t.isPersonal?'<span class="personal-label">Personal</span>':''}</small>`;
+  const url=sourceUrl(t),drag=standalone?`data-drag-project="${esc(t.projectKey)}"`:`data-drag="${esc(t.id)}"`,copy=`<strong>${esc(t.title)}</strong><small><span class="task-status-dot ${esc(t.status)}"></span><span>${esc(applicationInfo(t).name)}</span><span aria-hidden="true">·</span><span title="${esc(taskState(t).detail)}">${esc(stateLabel(t))}</span>${t.isPersonal?'<span class="personal-label">Personal</span>':''}</small>`;
   const attributes=!t.external?`data-native-handoff="${esc(t.id)}"`:t.capabilities?.bridged?`data-reveal="${esc(t.id)}"`:'';
   return `<li class="queue-item ${t.id===currentId?'focused':''} ${standalone?'standalone-task':''}" data-task="${esc(t.id)}" data-project-key="${esc(t.projectKey)}"><div class="queue-item-main">${standalone?`<span class="project-rank">P${rank}</span>`:''}<button class="drag-handle" draggable="true" ${drag} aria-label="Move ${esc(t.title)}${standalone?' in project priority':''}" title="Drag to reorder · Alt + arrow keys">${icon('bars-2')}</button>${url?`<a class="task-copy" ${attributes} href="${esc(url)}" title="Open ${esc(t.sourceTitle||t.title)} in its source app">${copy}</a>`:`<button class="task-copy" data-focus="${esc(t.id)}">${copy}</button>`}<button class="queue-more" data-manage="${esc(t.id)}" aria-label="Options for ${esc(t.title)}" aria-expanded="${managedQueueId===t.id}">${icon('ellipsis-horizontal')}</button><button class="source-link" data-focus="${esc(t.id)}" aria-label="Bring ${esc(t.title)} into focus" title="Bring into focus">${icon('arrow-up-right')}</button></div>${managedQueueId===t.id?`<div class="queue-actions"><button data-queue-action="work" data-task-id="${esc(t.id)}" aria-pressed="${!t.isPersonal}">Work</button><button data-queue-action="personal" data-task-id="${esc(t.id)}" aria-pressed="${!!t.isPersonal}">Personal</button><button data-queue-action="remove" data-task-id="${esc(t.id)}" ${['running','waiting'].includes(t.status)?'disabled title="Pause this task before removing it"':''}>Remove from queue</button></div>`:''}</li>`;
 }
 let lastQueueHtml='',previewAnchor=null;
 function renderQueue(){
-  $('#automatic-order').hidden=!(state.queueOrder.length||state.projectOrder?.length);
+  const custom=!!(state.queueOrder.length||state.projectOrder?.length),mode=state.sortMode||'recent';
+  $('#queue-sort').value=custom?'custom':mode;
+  const detail={recent:'Projects with the latest conversation activity first; newest chats first inside each project.',oldest:'Projects whose latest conversation activity is oldest first; oldest chats first inside each project.',priority:'Urgency and due dates first, then waiting questions and time since attention. Projects use their highest-ranked chat.'};
+  $('#queue-sort-hint').textContent=custom?'Your dragged positions come first. Choose a sort to replace them.':detail[mode];
+  $('#queue-sort').title=(custom?'Dragged positions override the base sort. ':'')+detail[mode]+' Choosing a sort replaces custom positions.';
   const html=queueGroups().map((group,index)=>{
     if(group.standalone)return `<li class="project-group standalone" data-project-group="${esc(group.key)}"><ol>${taskRow(group.tasks[0],{standalone:true,rank:index+1})}</ol></li>`;
     const collapsed=collapsedProjects.has(group.key),id=`project-chats-${index}`;
@@ -112,9 +150,9 @@ function hideQueuePreview(){previewAnchor?.removeAttribute('aria-describedby');p
 function showQueuePreview(row){
   if(!row||dragId||!document.body.classList.contains('drawer-open')||!$('#settings-view').hidden)return hideQueuePreview();
   const task=state.tasks.find(t=>t.id===row.dataset.task);if(!task)return hideQueuePreview();
-  const preview=queuePreview(task);if(!preview.overview&&!preview.status)return hideQueuePreview();
+  const preview=queuePreview(task);
   previewAnchor?.removeAttribute('aria-describedby');previewAnchor=row.contains(document.activeElement)?document.activeElement:row.querySelector('.task-copy');previewAnchor?.setAttribute('aria-describedby','queue-preview');
-  const popup=$('#queue-preview');$('#queue-preview-title').textContent=task.title;$('#queue-preview-overview').textContent=preview.overview;$('#queue-preview-status').textContent=preview.status;popup.hidden=false;
+  const popup=$('#queue-preview');$('#queue-preview-title').textContent=task.title;$('#queue-preview-overview').textContent=preview.overview;$('#queue-preview-status').textContent=preview.status;$('#queue-preview-state').textContent=taskState(task).detail;popup.hidden=false;
   const anchor=row.getBoundingClientRect(),edge=$('#drawer').getBoundingClientRect().right,width=popup.getBoundingClientRect().width;
   popup.style.left=`${edge+width+32<=innerWidth?edge+16:Math.max(16,innerWidth-width-16)}px`;
   popup.style.top=`${Math.max(16,Math.min(anchor.top,innerHeight-popup.getBoundingClientRect().height-16))}px`;
@@ -130,7 +168,7 @@ $('#queue-list').addEventListener('click',e=>{
 });
 function openDrawer(pin=false) { clearTimeout(hoverTimer);clearTimeout(closeTimer);drawerPinned=pin;document.body.classList.add('drawer-open');$('#drawer').inert=false;$('#queue-edge').setAttribute('aria-expanded','true');$('#drawer-scrim').hidden=false; }
 function closeDrawer() { hideQueuePreview();clearTimeout(closeTimer);drawerPinned=false;document.body.classList.remove('drawer-open');$('#drawer').inert=true;$('#queue-edge').setAttribute('aria-expanded','false');$('#drawer-scrim').hidden=true;if(session)$('#thought').focus({preventScroll:true}); }
-function settings(show) { hideQueuePreview(); $('#queue-view').hidden=show;$('#settings-view').hidden=!show;$('#drawer-title').textContent=show?'Settings':'Your queue';$('#settings-toggle').innerHTML=show?icon('arrow-left')+'Your queue':icon('cog-6-tooth')+'Settings & memory';if(show)fillSettings(); }
+function settings(show) { hideQueuePreview(); $('#queue-view').hidden=show;$('#settings-view').hidden=!show;$('#drawer-title').textContent=show?'Settings':'Your queue';$('#settings-toggle').innerHTML=show?icon('arrow-left')+'Your queue':icon('cog-6-tooth')+'Settings & memory';$('#settings-toggle').insertAdjacentHTML('beforeend',shortcutMarkup(show?'queue':'settings',isMac));$('#settings-toggle').title=show?(isMac?'Open queue · Command-backslash':'Open queue · Control-backslash'):(isMac?'Open settings · Command-comma':'Open settings · Control-comma');if(show)fillSettings(); }
 function populateVoices() {
   const voices='speechSynthesis' in window ? speechSynthesis.getVoices().filter(v=>v.lang.startsWith('en')&&(/premium|enhanced|natural/i.test(v.name)||['Samantha','Daniel','Karen','Moira','Tessa','Rishi',state.profile.voiceName].includes(v.name))):[];
   const value=$('#voice-name').value||state.profile.voiceName||'';
@@ -138,8 +176,6 @@ function populateVoices() {
   $('#voice-name').value=value;
 }
 function fillSettings() {
-  if(settingsDirty)return;
-  $('#save-preferences').disabled=true;
   const p=state.profile;$('#profile-name').value=p.name||'';$('#profile-memories').value=(p.memories||[]).join('\n');$('#profile-personality').value=p.personality||'';
   $('#auto-read').checked=p.autoRead;$('#auto-send').checked=p.autoSend;$('#auto-advance').checked=p.autoAdvance;$('#voice-rate').value=String(p.voiceRate||1);$('#voice-tone').value=p.voiceTone||'natural';$('#prompt-policy').value=p.promptPolicy||'smart';populateVoices();$('#voice-name').value=p.voiceName||'';
   $('#voice-provider').value=p.voiceProvider||'system';fillNaturalVoices(p.naturalVoiceId);renderVoiceSettings();
@@ -171,7 +207,7 @@ function fillProjectNotes(){
   $('#context-project').innerHTML=[...projects].map(([key,name])=>`<option value="${esc(key)}">${esc(name)}</option>`).join('');
   if(projects.has(previous))$('#context-project').value=previous;
   $('#project-context').value=state.projectContexts?.[$('#context-project').value]?.text||'';
-  $('#save-project-context').disabled=!projects.size;
+  $('#project-context').disabled=!projects.size;
 }
 function fillNaturalVoices(preferred=$('#natural-voice-name').value||state.profile.naturalVoiceId||'KH1SQLVulwP6uG4O3nmT'){
   const voices=state.speech?.voices||[], options=voices.map(v=>({value:v.id,label:v.name+(v.libraryVoice?' · paid API':'')}));
@@ -238,21 +274,26 @@ function present(scene, task, {read=true,onEnd,narrate=false,next=false}={}) {
   $('#scene-actions').innerHTML=actions;offerConductorQuestion();$('#source-detail').hidden=!task||task.isConductor;$('#source-detail').open=false;
   $('#source-content').innerHTML=task?markdown(task.summary||task.brief):'';if(task?.origins?.length)$('#source-content').innerHTML+='<h3>Original conversations</h3>'+task.origins.map(o=>{const url=sourceUrl({application:o.application,threadId:o.threadId,sourceUrl:o.url,external:true});return `<p>${url?`<a href="${esc(url)}">${esc(o.title)} ↗</a>`:esc(o.title)}<br><small>${esc(applicationInfo(o.application).name)} · ${esc(o.importedAt)}</small></p>`;}).join('');
   if(read){const text=narrate?briefingNarration(scene,task,{name:state.profile.name||'',first:firstBrief,next:!firstBrief&&next,returning:!!scene.returning}):scene.spoken||scene.body;if(task&&narrate)firstBrief=false;currentScene.readAloud=text;speak(text,onEnd);}
-  if(narrate&&task&&!task.isConductor){presentedTasks.add(task.id);task.briefedAt ||= new Date().toISOString();api(`tasks/${task.id}/presented`,{}).catch(()=>{});}
+  if(narrate&&task&&!task.isConductor){presentedTasks.add(task.id);task.briefedAt ||= new Date().toISOString();api(`tasks/${task.id}/presented`,{version:task.attentionVersion}).catch(()=>{});}
   warmUpcoming();
   if(session&&!document.body.classList.contains('drawer-open'))$('#thought').focus({preventScroll:true});
 }
-async function fetchState(){const next=await api('state');token=next.token;state=next;renderChrome();return state;}
-async function refreshLoaded(){const next=await api('session/refresh',{});state={...state,...next};renderChrome();if(next.refreshErrors?.length)notice('Some source chats could not be refreshed. Their saved context is still here.');}
+async function fetchState(){const next=await api('state');token=next.token;state=next;overlaySettings();renderChrome();return state;}
+async function refreshLoaded(){const next=await api('session/refresh',{});state={...state,...next};overlaySettings();renderChrome();if(next.refreshErrors?.length)notice('Some source chats could not be refreshed. Their saved context is still here.');}
 async function focusTask(id,{refresh=true,keepDrawer=false}={}) {
   if(busy)return;queueStarted=true;if(recording)stopMic(false);clearTimeout(autoSendTimer);clearTimeout(advanceTimer);stopSpeaking();persistDraft();
   const run=++generation;setBusy(true);currentId=id;restoreDraft();if(!keepDrawer)closeDrawer();
   showTransition('One moment.', 'Bringing this thread back into focus.');
   try{
     if(refresh)refreshLoaded().catch(()=>{});
-    const task=currentTask();if(!task||task.status==='done')return await nextTask({skipCurrent:false,inside:true});
-    const scene=await preparedScene(task);if(run!==generation)return;
-    seen[id]=fingerprint(currentTask()||task);present(scene,currentTask()||task,{narrate:true});acknowledgeDraftTarget();renderQueue();
+    let task=currentTask(),scene=null;
+    for(let attempt=0;attempt<3;attempt++){
+      if(!task||task.status==='done')return await nextTask({skipCurrent:false,inside:true});
+      const prepared=await preparedScene(task);if(run!==generation)return;
+      const latest=currentTask();if(latest&&fingerprint(latest)===fingerprint(task)){scene=prepared;task=latest;break;}task=latest;
+    }
+    if(!scene)throw new Error('This task is still updating. Bring it into focus again to hear the latest.');
+    seen[id]=fingerprint(task);present(scene,task,{narrate:true});acknowledgeDraftTarget();renderQueue();
   }catch(error){if(run===generation){const task=currentTask();present({title:task?.title||'Your queue is still here.',body:task?'I couldn’t prepare a fresh briefing. The saved context is available below.':error.message,spoken:'',needsReply:false,advance:false},task,{read:false});notice(error.message);}}
   finally{if(run===generation)setBusy(false);}
 }
@@ -294,6 +335,7 @@ async function sendThought() {
   if(/^(open( this| the task)?|open (in )?(codex|chatgpt|claude))[.!?]?$/i.test(text)&&sourceUrl(task||{})){clearSentDraft(key,text);const link=$('#scene-actions a');if(link)link.click();return;}
   setBusy(true);$('#input-hint').textContent='Thinking it through.';
   try{
+    await inferenceSaver.flush();if(inferenceSaver.error)throw new Error('The model preference has not saved. Retry it in Settings before starting the next turn.');
     const result=await api('conductor',{text,taskId:task?.id,requestId:task?.pending[0]?.id||null,briefKey:currentScene?.briefKey||null});clearSentDraft(key,text);pendingConductor=result.id;
     showTransition('Thinking it through.','Your thought is with me.');
     await fetchState();consumeConductor();
@@ -377,30 +419,36 @@ $('#drawer').onmouseenter=()=>clearTimeout(closeTimer);$('#drawer').onmouseleave
 $('#drawer').addEventListener('focusin',()=>{drawerPinned=true;});$('#close-drawer').onclick=closeDrawer;$('#drawer-scrim').onclick=closeDrawer;
 $('#settings-toggle').onclick=()=>{openDrawer(true);settings($('#settings-view').hidden);};
 document.addEventListener('lounge:settings',()=>{openDrawer(true);settings(true);});
-$('#sound').onclick=async()=>{try{stopSpeaking();state.profile=await api('profile',{autoRead:!state.profile.autoRead});renderChrome();}catch(e){notice(e.message);}};
+$('#sound').onclick=()=>{stopSpeaking();savePreference({autoRead:!state.profile.autoRead});};
 $('#fullscreen').onclick=async()=>{if(window.webkit?.messageHandlers?.loungeShell){window.webkit.messageHandlers.loungeShell.postMessage({action:'fullscreen'});return;}try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{notice('Fullscreen is available through your browser or app window controls.');}};
 $('#talk-about-queue').onclick=()=>openEntry('add');
 $('#scene-actions').addEventListener('click',e=>{const action=e.target.closest('[data-entry]')?.dataset.entry;if(!action||busy)return;if(action==='queue')nextTask({skipCurrent:false});else if(action==='question'){const t=conductor();if(t?.pending?.length)showConductorQuestion(t);}else openEntry(action);});
-const preferenceFields=new Set(['profile-name','profile-memories','profile-personality','auto-read','auto-send','auto-advance','voice-name','voice-provider','natural-voice-name','voice-rate','voice-tone','prompt-policy']);
-$('#settings-form').addEventListener('input',e=>{if(preferenceFields.has(e.target.id)){settingsDirty=true;settingsEditVersion++;$('#save-preferences').disabled=false;}});
-$('#settings-form').onsubmit=async e=>{e.preventDefault();const savedEditVersion=settingsEditVersion;const previousVoice=JSON.stringify([state.profile.voiceProvider,state.profile.naturalVoiceId,state.profile.voiceTone,state.profile.voiceRate]);try{if($('#voice-provider').value==='elevenlabs'&&!state.speech?.ready)throw new Error('Connect ElevenLabs before choosing natural speech.');state.profile=await api('profile',{name:$('#profile-name').value,memories:$('#profile-memories').value.split('\n').filter(Boolean),personality:$('#profile-personality').value,autoRead:$('#auto-read').checked,autoSend:$('#auto-send').checked,autoAdvance:$('#auto-advance').checked,voiceName:$('#voice-name').value,voiceRate:Number($('#voice-rate').value),voiceTone:$('#voice-tone').value,voiceProvider:$('#voice-provider').value,naturalVoiceId:$('#natural-voice-name').value,promptPolicy:$('#prompt-policy').value});if(previousVoice!==JSON.stringify([state.profile.voiceProvider,state.profile.naturalVoiceId,state.profile.voiceTone,state.profile.voiceRate]))resetVoicePlayback();if(savedEditVersion===settingsEditVersion){settingsDirty=false;$('#save-preferences').disabled=true;}renderChrome();notice('I’ll remember.');}catch(error){notice(error.message);}};
-$('#voice-provider').onchange=renderVoiceSettings;
-for(const scope of ['coordinator','workers']){
-  $(`#${scope}-model`).onchange=()=>fillEfforts(scope);
-  $(`#save-${scope==='workers'?'workers':'coordinator'}-model`).onclick=async()=>{try{await api('inference',{scope,model:$(`#${scope}-model`).value,effort:$(`#${scope}-effort`).value||null});await fetchState();notice('Model preference saved for the next turn.');}catch(error){notice(error.message);}};
+const preferenceFields={'profile-name':'name','profile-memories':'memories','profile-personality':'personality','auto-read':'autoRead','auto-send':'autoSend','auto-advance':'autoAdvance','voice-name':'voiceName','voice-provider':'voiceProvider','natural-voice-name':'naturalVoiceId','voice-rate':'voiceRate','voice-tone':'voiceTone','prompt-policy':'promptPolicy'};
+function preferenceInput(e){
+  const field=e.target,key=preferenceFields[field.id];if(!key)return;
+  const text=field.matches('textarea,input:not([type=checkbox])');if((text&&e.type!=='input')||(!text&&e.type!=='change'))return;
+  const value=key==='memories'?field.value.split('\n').filter(Boolean):key==='voiceRate'?Number(field.value):field.type==='checkbox'?field.checked:field.value;
+  savePreference({[key]:value},text);if(key==='voiceProvider')renderVoiceSettings();
 }
-async function refreshModels(){const button=$('#reload-models');button.disabled=true;try{const result=await api('models',{});state.runtimes=result.providers;state.inference=result.inference;fillModels();if(result.errors.length)notice(result.errors.map(e=>e.error).join(' '));}catch(error){notice(error.message);}finally{button.disabled=false;}}
+$('#settings-form').addEventListener('input',preferenceInput);$('#settings-form').addEventListener('change',preferenceInput);
+$('#settings-form').onsubmit=e=>e.preventDefault();
+$('#retry-settings').onclick=async()=>{try{await fetchState();for(const saver of [preferenceSaver,noteSaver,inferenceSaver])await saver.retry();}catch(error){notice(error.message);}};
+for(const scope of ['coordinator','workers']){
+  const saveModel=()=>{const selection={model:$(`#${scope}-model`).value,effort:$(`#${scope}-effort`).value||null};state.inference={...state.inference,[scope]:selection};inferenceSaver.update({[scope]:selection});};
+  $(`#${scope}-model`).onchange=()=>{fillEfforts(scope);saveModel();};$(`#${scope}-effort`).onchange=saveModel;
+}
+async function refreshModels(){const button=$('#reload-models');button.disabled=true;try{const result=await api('models',{});state.runtimes=result.providers;state.inference=result.inference;overlaySettings();fillModels();if(result.errors.length)notice(result.errors.map(e=>e.error).join(' '));}catch(error){notice(error.message);}finally{button.disabled=false;}}
 $('#reload-models').onclick=refreshModels;
 $('#models-settings').ontoggle=()=>{if($('#models-settings').open&&!(state.runtimes||[]).some(r=>r.models.length))refreshModels();};
 $('#connect-local').onclick=async()=>{const button=$('#connect-local');button.disabled=true;try{const result=await api('local/connect',{url:$('#local-endpoint').value});state.runtimes=result.providers;fillModels();$('#local-status').textContent='Connected · choose a coordinator model above';notice('Local models are available.');}catch(error){$('#local-status').textContent=error.message;notice(error.message);}finally{button.disabled=false;}};
 $('#context-project').onchange=()=>{$('#project-context').value=state.projectContexts?.[$('#context-project').value]?.text||'';};
-$('#save-project-context').onclick=async()=>{try{await api('context',{scope:'project',projectKey:$('#context-project').value,text:$('#project-context').value});await fetchState();notice('Project note saved.');}catch(error){notice(error.message);}};
+$('#project-context').oninput=()=>{const key=$('#context-project').value;if(!key)return;const text=$('#project-context').value;state.projectContexts||={};state.projectContexts[key]={...state.projectContexts[key],text};noteSaver.update({[key]:text},{debounce:true});};
 $('#export-lounge').onclick=async()=>{try{const snapshot=await api('export',{}),url=URL.createObjectURL(new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download=`command-lounge-${new Date().toISOString().slice(0,10)}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('Exported your queue and preferences. Credentials stay on this Mac.');}catch(error){notice(error.message);}};
 const rotationLabels={all:'All projects',work:'Work projects only',personal:'Personal projects only'};
-async function changeRotation(mode){try{await api('rotation',{mode});await fetchState();notice(rotationLabels[mode]);}catch(error){$('#rotation-mode').value=state.rotationMode||'all';notice(error.message);}}
-$('#rotation-mode').onchange=e=>changeRotation(e.target.value);
+async function changeRotation(mode){try{await api('rotation',{mode});await fetchState();notice(rotationLabels[mode]);}catch(error){$('#rotation-mode').value=state.rotationMode||'all';$('#queue-filter').value=state.rotationMode||'all';notice(error.message);}}
+$('#rotation-mode').onchange=$('#queue-filter').onchange=e=>changeRotation(e.target.value);
 $('#reload-voices').onclick=async()=>{const button=$('#reload-voices');button.disabled=true;try{state.speech=await api('voice/refresh',{});fillNaturalVoices();renderVoiceSettings();notice('Your voices are up to date.');}catch(error){notice(error.message);}finally{button.disabled=false;}};
-$('#disconnect-voice').onclick=async()=>{try{stopSpeaking();state.speech=await api('voice/disconnect',{});state.profile=await api('profile',{voiceProvider:'system'});$('#voice-provider').value='system';renderVoiceSettings();notice('Natural speech disconnected.');}catch(error){notice(error.message);}};
+$('#disconnect-voice').onclick=async()=>{try{stopSpeaking();state.speech=await api('voice/disconnect',{});savePreference({voiceProvider:'system'});$('#voice-provider').value='system';renderVoiceSettings();notice('Natural speech disconnected.');}catch(error){notice(error.message);}};
 $('#connect-voice').onclick=async()=>{const button=$('#connect-voice');button.disabled=true;try{state.speech=await api('voice/connect',{key:$('#voice-key').value});resetVoicePlayback();$('#voice-key').value='';fillNaturalVoices();renderVoiceSettings();notice('Your natural voice is connected. Use Listen to try it.');}catch(error){notice(error.message);}finally{button.disabled=false;}};
 $('#test-voice').onclick=()=>{unlockAudio();explicitVoiceRetry=true;speak(entryScene(state.profile.name).spoken,undefined,{...state.profile,autoRead:true,voiceProvider:$('#voice-provider').value,voiceName:$('#voice-name').value,naturalVoiceId:$('#natural-voice-name').value,voiceRate:Number($('#voice-rate').value),voiceTone:$('#voice-tone').value});};
 if('speechSynthesis' in window)speechSynthesis.onvoiceschanged=populateVoices;
@@ -416,7 +464,7 @@ async function afterReorder(){
 }
 async function reorderProjects(keys){await api('order/projects',{keys,revision:state.projectOrderRevision});await afterReorder();}
 async function reorderChats(projectKey,ids){await api('order/chats',{projectKey,ids,revision:state.orderRevision});await afterReorder();}
-$('#automatic-order').onclick=async()=>{try{await api('order/projects',{keys:[],revision:state.projectOrderRevision});await fetchState();await api('order',{ids:[],revision:state.orderRevision});await afterReorder();notice('Back to automatic priority.');}catch(error){notice(error.message);}};
+$('#queue-sort').onchange=async e=>{try{await api('sort',{mode:e.target.value,projectRevision:state.projectOrderRevision,orderRevision:state.orderRevision});await fetchState();notice('Queue sorted · '+e.target.selectedOptions[0].textContent);}catch(error){await fetchState().catch(()=>{});notice(error.message);}};
 function moveBeforeOrAfter(ids,id,target,after){const result=ids.filter(key=>key!==id),index=result.indexOf(target);if(index<0)throw new Error('The queue changed. Try the move again.');result.splice(index+(after?1:0),0,id);return result;}
 function dragTarget(e){
   if(!dragId)return null;
@@ -463,11 +511,16 @@ if(action==='refresh'){if(safeToRefocus())await focusTask(t.id,{refresh:false});
 if(action==='open-claude'){if(window.webkit?.messageHandlers?.loungeShell)window.webkit.messageHandlers.loungeShell.postMessage({action:'openClaude'});else notice('Open Claude → Code and use /resume to select the saved session shown here.');}
 if(action==='clear'){await removeTask(t.id);}if(action==='later'){await api(`tasks/${t.id}/snooze`,{hours:4});await nextTask();}if(action==='approve'||action==='decline'){await api(`tasks/${t.id}/answer`,{requestId:t.pending[0].id,decision:action==='approve'?'accept':'decline'});await nextTask();}if(action==='interrupt'){await api(`tasks/${t.id}/interrupt`,{});notice('I’ve asked the agent to pause.');}}}catch(error){notice(error.message);}finally{if(el.isConnected)el.disabled=false;}});
 document.addEventListener('paste',onPaste);
-document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.code==='KeyP'){e.preventDefault();changeRotation(state.rotationMode==='work'?'all':'work');return;}if(e.key==='Escape'){cancelAutoSend();stopSpeaking();if(recording)stopMic(false);if(document.body.classList.contains('drawer-open'))closeDrawer();return;}if(e.code==='Space'&&!session&&!textTarget(e.target)&&!document.body.classList.contains('drawer-open')){e.preventDefault();startSession();return;}if((e.metaKey||e.ctrlKey)&&e.key==='\\'){e.preventDefault();document.body.classList.contains('drawer-open')?closeDrawer():openDrawer(true);return;}if(session&&!textTarget(e.target)&&!document.body.classList.contains('drawer-open')&&e.key.length===1&&!e.metaKey&&!e.ctrlKey&&!e.altKey){$('#thought').focus();}});
-await fetchState();warmUpcoming();refreshLoaded().catch(()=>{});
+document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key===','){e.preventDefault();openDrawer(true);settings(true);return;}if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.code==='KeyP'){e.preventDefault();changeRotation(state.rotationMode==='work'?'all':'work');return;}if(e.key==='Escape'){cancelAutoSend();stopSpeaking();if(recording)stopMic(false);if(document.body.classList.contains('drawer-open'))closeDrawer();return;}if(e.code==='Space'&&!session&&!textTarget(e.target)&&!document.body.classList.contains('drawer-open')){e.preventDefault();startSession();return;}if((e.metaKey||e.ctrlKey)&&e.key==='\\'){e.preventDefault();if(document.body.classList.contains('drawer-open')&&$('#settings-view').hidden)closeDrawer();else{settings(false);openDrawer(true);}return;}if(session&&!textTarget(e.target)&&!document.body.classList.contains('drawer-open')&&e.key.length===1&&!e.metaKey&&!e.ctrlKey&&!e.altKey){$('#thought').focus();}});
+const isMac=/Mac|iPhone|iPad/.test(navigator.platform);
+for(const el of document.querySelectorAll('[data-shortcut]'))el.innerHTML=shortcutMarkup(el.dataset.shortcut,isMac);
+if(!isMac)for(const el of document.querySelectorAll('[title]'))el.title=el.title.replaceAll('Command','Control');
+$('#settings-toggle').insertAdjacentHTML('beforeend',shortcutMarkup('settings',isMac));
+$('#settings-toggle').title=isMac?'Open settings · Command-comma':'Open settings · Control-comma';
+await fetchState();for(const saver of [preferenceSaver,noteSaver,inferenceSaver])if(saver.dirty)saver.flush();warmUpcoming();refreshLoaded().catch(()=>{});
 const events=new EventSource('/api/events');
 events.addEventListener('state',e=>{
-  const previous=state, next=JSON.parse(e.data);state={...state,...next};
+  const previous=state, next=JSON.parse(e.data);state={...state,...next};overlaySettings();
   for(const task of state.tasks){const old=previous.tasks.find(t=>t.id===task.id);if(inRotation(task,state.rotationMode)&&old&&!inRotation(old,previous.rotationMode))delete seen[task.id];}
   renderChrome();consumeConductor();warmUpcoming();
   if(!maySurfaceQueue({session,queueStarted,busy,pendingConductor}))return;

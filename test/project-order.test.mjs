@@ -11,6 +11,7 @@ import {pickNext,fingerprint} from '../public/flow.js';
 class FakeCodex extends EventEmitter {async start(){}stop(){}}
 function fixture(path=':memory:'){
   const store=new Store(path),codex=new FakeCodex(),engine=new Engine(store,codex,process.cwd());
+  store.setMeta('settings',{...store.getMeta('settings'),sortMode:'priority'});
   store.setMeta('projects',[...store.getMeta('projects').filter(p=>!['a','b'].includes(p.id)),{id:'a',name:'Project A',path:process.cwd()},{id:'b',name:'Project B',path:process.cwd()}]);
   return {store,codex,engine};
 }
@@ -25,7 +26,7 @@ test('project priority contains the whole project before another project’s cha
 test('automatic project ranking uses visible urgency while manual chat order stays inside its project',()=>{
   const {store,engine}=fixture(),a=engine.capture({title:'A low',projectId:'a',priority:'low'}),hidden=engine.capture({title:'A personal',projectId:'a',priority:'critical'}),b=engine.capture({title:'B high',projectId:'b',priority:'high'});
   engine.classify(hidden.id,true,'task');engine.setRotation('work');
-  assert.deepEqual(projectGroups(engine.state().tasks,{mode:'work'}).map(g=>g.key),['project:b','project:a']);
+  assert.deepEqual(projectGroups(engine.state().tasks,{mode:'work',sortMode:'priority'}).map(g=>g.key),['project:b','project:a']);
   store.reorder([a.id,b.id,hidden.id],0);assert.equal(pickNext(engine.state().tasks,{},'work').id,b.id);
   engine.setRotation('all');assert.equal(pickNext(engine.state().tasks).projectKey,'project:a');store.close();
 });
@@ -63,5 +64,8 @@ test('project and chat ordering tools expose the same queue hierarchy and optimi
   const call=async(tool,args)=>{await engine.request({id:1,method:'item/tool/call',params:{threadId:'conductor-thread',tool,arguments:args}});assert.equal(replies.at(-1).success,true);return JSON.parse(replies.at(-1).contentItems[0].text);};
   const q=await call('lounge_queue',{});assert.equal(q.queueProjects.length,2);
   await call('lounge_order_projects',{keys:['project:b','project:a'],revision:q.projectOrderRevision});await call('lounge_order_chats',{projectKey:'project:a',ids:[a2.id,a1.id],revision:q.orderRevision});
-  assert.deepEqual((await call('lounge_queue',{})).tasks.map(t=>t.id),[b.id,a2.id,a1.id]);store.close();
+  assert.deepEqual((await call('lounge_queue',{})).tasks.map(t=>t.id),[b.id,a2.id,a1.id]);
+  const custom=await call('lounge_queue',{});assert.equal(custom.customOrder,true);
+  await call('lounge_sort',{mode:'recent',projectRevision:custom.projectOrderRevision,orderRevision:custom.orderRevision});
+  const sorted=await call('lounge_queue',{});assert.equal(sorted.sortMode,'recent');assert.equal(sorted.customOrder,false);store.close();
 });

@@ -2,7 +2,7 @@ import { rotationTasks } from './rotation.js';
 import { applicationFor, applicationInfo, validSourceUrl } from './applications.js';
 
 export function fingerprint(task) {
-  return JSON.stringify([task.id, task.status, task.sourceTurnId || null, task.pending?.map(p => p.id), task.summary || '', task.resurfacedAt || null]);
+  return JSON.stringify([task.id, task.status, task.sourceTurnId || task.turnId || null, task.pending?.map(p => p.id), task.summary || '', task.resurfacedAt || null]);
 }
 export function pickNext(tasks, seen = {}, mode = 'all') {
   const candidates = rotationTasks(tasks, mode).filter(t => t.status !== 'running');

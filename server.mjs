@@ -105,6 +105,7 @@ const server = createServer(async (req, res) => {
         store.setMeta('localEndpoint', local.endpoint); engine.changed();
         return send(res, 200, await engine.models());
       }
+      if(url.pathname==='/api/sort')return send(res,200,engine.setSort(b.mode,b.projectRevision,b.orderRevision));
       if (url.pathname === '/api/rotation') return send(res, 200, engine.setRotation(b.mode));
       if(url.pathname==='/api/order/chats')return send(res,200,engine.orderChats(b.projectKey,b.ids,b.revision));
       if(url.pathname==='/api/order/projects')return send(res,200,engine.orderProjects(b.keys,b.revision));
@@ -149,7 +150,7 @@ const server = createServer(async (req, res) => {
         else if (action === 'watch') result = await engine.resumeSource(id);
         else if (action === 'reveal') result = await desktop.revealSource(store.get(id));
         else if (action === 'interrupt') result = await engine.interrupt(id);
-        else if (action === 'presented') result = engine.presented(id);
+        else if (action === 'presented') result = engine.presented(id,b.version);
         else if (action === 'clear') result = engine.clear(id);
         else if (action === 'restore') result = engine.restore(id);
         else if (action === 'classify') result = engine.classify(id, b.personal, b.scope);

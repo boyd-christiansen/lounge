@@ -38,7 +38,8 @@ Development data lives in ignored `data/`. The installed app uses `~/Library/App
 - Use a task’s **···** menu to mark it Work/Personal or Remove from queue. Removal has Undo and preserves the original conversation. Moving on never clears a task.
 - Ask to snooze a task or change which project categories enter rotation. Settings → Flow also selects All, Work only or Personal only. Cmd+Shift+P toggles Work only/All.
 - Ask to find an existing conversation. Review its preview before import. Bringing it fully into Lounge creates a linked continuation in a supported agent runtime; it does not bulk-migrate or overwrite the original.
-- Read aloud uses your system voice or an optional ElevenLabs API connection. Select a voice, pace and delivery in Settings. Shared library voices can require a paid provider plan.
+- Choose Most recent, Least recent or Priority at the top of the queue. A project’s latest conversation activity determines recency; chats sort inside their project. Dragging creates a custom order; choosing a named sort replaces dragged positions. Voice requests use the same sorting and Work/Personal/All filter tools. Background polling and briefing caches do not count as conversation activity.
+- Read aloud uses your system voice or an optional ElevenLabs API connection. Select a voice, pace and delivery in Settings; changes save immediately and apply to the next spoken message. Shared library voices can require a paid provider plan.
 
 ## Runtimes and source ownership
 
@@ -67,6 +68,10 @@ npm run check:public
 
 [Architecture](docs/ARCHITECTURE.md) · [Design review](docs/DESIGN.md) · [Prompt routing](docs/PROMPTING.md) · [Progress](docs/PROGRESS.md)
 
-Project priorities and chat order persist independently and are included in exports. Voice requests can use the same project/chat ordering tools. Personal filters and snooze retain hidden positions. Settings use one open section at a time, keep Save visible, and preserve unsaved edits when closed.
+Project priorities and chat order persist independently and are included in exports. Voice requests can use the same project/chat ordering tools. Personal filters and snooze retain hidden positions. Settings use one open section at a time. Voice, memory, project notes and model choices save automatically; connection actions remain explicit. Failed edits stay on this device and can be retried.
 
 The public branch starts from a clean source baseline. Private pre-publication history stays local and must not be merged or pushed. Commit focused changes after verification. Photo and icon credits are in [assets/CREDITS.md](public/assets/CREDITS.md).
+
+Queue states describe the current turn, not completion of the whole project: **Working**, **Needs your answer**, **Approval needed**, **Ready for review**, **Next step** (already presented), **Paused**, **Needs attention**, or **Saved snapshot** when live completion cannot be verified. Opening a result never removes it. Hover or focus a queue row for context and a state explanation.
+
+Shortcut keycaps are shown beside their controls: **⇧⌘P** toggles Work only/All, **⌘,** opens Settings and **Command-backslash** opens the queue (Control replaces Command on other platforms). **Escape** closes the drawer.

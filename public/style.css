@@ -107,7 +107,14 @@ body.drawer-open #drawer{transform:translateX(0)}
 .workspaces{margin-top:24px;font-size:12px;line-height:1.5;color:var(--ink-secondary)}.workspaces>summary{line-height:1.5}.workspaces[open]>summary{margin-bottom:16px}.workspaces .setting-note{margin-top:12px}.workspaces label{font-size:12px}.inline-action{margin-top:16px}
 #workspace-list>p{font-size:12px;line-height:1.5;margin:16px 0;color:var(--ink-secondary)}#workspace-list small{display:block;font-size:11px;color:var(--ink-muted);line-height:1.6;margin-top:4px;overflow-wrap:anywhere}
 .quiet-button{font-size:12px;line-height:1.5;min-height:36px;padding:8px 12px;border:1px solid #ffffff28;border-radius:7px;color:var(--ink-main);background:#ffffff04;white-space:nowrap}.quiet-button:hover{background:#ffffff0b}
-.settings-save-bar{padding:16px var(--drawer-gutter);border-top:1px solid var(--drawer-line);flex:none}.save-settings{width:100%;margin:0;background:#dedee1;color:#232326;border-color:transparent;font-weight:500}.save-settings:hover{background:#eeeeef;color:#232326}
+.autosave-line{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 var(--drawer-gutter) 20px;min-height:36px;font-size:11px;line-height:1.5;color:var(--ink-muted);flex:none}.autosave-line .save-error{color:#eed0ad;overflow-wrap:anywhere}
+.shortcut{display:inline-flex;align-items:center;gap:3px;color:var(--ink-muted);white-space:nowrap;line-height:1}
+.shortcut kbd{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:19px;padding:1px 3px;border:1px solid #ffffff25;border-radius:4px;background:#ffffff04;font:10px/1 -apple-system,BlinkMacSystemFont,sans-serif;color:inherit;letter-spacing:0}
+.drawer-footer button{width:100%}.drawer-footer button>.shortcut{margin-left:auto}.label-with-shortcut{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:19px}
+.queue-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.queue-controls label{display:flex;flex-direction:column;gap:8px;color:var(--ink-secondary);font-size:12px;line-height:19px;min-width:0}
+.queue-controls .label-with-shortcut{height:20px;min-height:20px}
+.queue-controls select{min-width:0;width:100%;font-size:12px;border:1px solid #ffffff1b;border-radius:7px;background-color:#ffffff04;color:var(--ink-main)}
+.queue-sort-hint{font-size:11px;line-height:1.5;margin:10px 0 12px;min-height:33px}#queue-preview-state{border-top:1px solid var(--drawer-line);padding-top:8px;margin-top:10px;font-size:11px;color:var(--ink-muted);-webkit-line-clamp:5}
 .drawer-footer{border-top:1px solid var(--drawer-line);padding:16px var(--drawer-gutter);flex:none}.drawer-footer button{display:flex;align-items:center;gap:10px;font-size:12px;line-height:1.5;color:var(--ink-secondary);padding:0;min-height:32px}.drawer-footer button:hover{color:white}
 @media(max-width:760px){#drawer{width:min(92vw,460px)}.room-header{padding:24px}.room-controls{gap:8px}}
 @media(max-width:420px){:root{--drawer-gutter:16px}.settings-section>summary>span{font-size:10px}.queue-item-main{gap:4px;grid-template-columns:24px 24px minmax(0,1fr) 28px 28px}.queue-item-main .drag-handle,.queue-item-main .queue-more,.queue-item-main .source-link{width:28px}.voice-preview{gap:12px}}
@@ -115,12 +122,11 @@ body.drawer-open #drawer{transform:translateX(0)}
 
 .voice-service-actions{display:flex;align-items:center;gap:16px;margin:12px 0}.voice-service-actions:empty{display:none}
 
-/* Keep settings edits visible and stable until explicitly saved. */
-.save-settings:disabled{background:#ffffff08;color:#a9a9af;opacity:1;cursor:default;border-color:#ffffff18}
+/* Shared field and icon rhythm in the drawer. */
 .settings-content>label:first-child{margin-top:0}.settings-content label{margin-top:16px}
 .icon-button,#sound{font-size:inherit}
 
 /* Native WebKit ignores popup sizing while platform appearance is enabled. */
-.settings-content select{appearance:none;-webkit-appearance:none;height:36px;line-height:18px;padding:8px 36px 8px 10px;background-image:url('/assets/select-chevron.svg');background-size:16px 16px;background-repeat:no-repeat;background-position:right 10px center}
+.settings-content select,.queue-controls select{appearance:none;-webkit-appearance:none;height:36px;line-height:18px;padding:8px 36px 8px 10px;background-image:url('/assets/select-chevron.svg');background-size:16px 16px;background-repeat:no-repeat;background-position:right 10px center}
 .settings-content input:not([type="checkbox"]){height:36px;line-height:18px}
 .settings-content select:disabled{opacity:.55;cursor:default}
