@@ -76,9 +76,9 @@ test('repeat visits use the concise update and decision but keep all choices',as
 test('entry greets the saved user without selecting work or starting rotation', async () => {
   const { entryScene, maySurfaceQueue } = await import('../public/flow.js');
   const greeting=entryScene('Boyd');
-  assert.equal(greeting.spoken,'Hello Boyd, what should we do?');
-  assert.equal(greeting.advance,false);assert.equal(greeting.entry,'greeting');
-  assert.equal(entryScene('').spoken,'Hello, what should we do?');
+  assert.equal(greeting.spoken,'Hello Boyd, what’s on your mind?');
+  assert.equal(greeting.body,'');assert.equal(greeting.advance,false);assert.equal(greeting.entry,'greeting');
+  assert.equal(entryScene('').spoken,'Hello, what’s on your mind?');
   assert.equal(maySurfaceQueue({session:true,queueStarted:false}),false);
   assert.equal(maySurfaceQueue({session:true,queueStarted:true}),true);
   assert.equal(maySurfaceQueue({session:true,queueStarted:true,pendingConductor:'run'}),false);

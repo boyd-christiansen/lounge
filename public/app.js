@@ -190,7 +190,7 @@ function present(scene, task, {read=true,onEnd,narrate=false,next=false}={}) {
   if(migration)$('#scene-artifacts').innerHTML+=migrationCard(migration);
   if(task?.handoff)$('#scene-artifacts').innerHTML+=`<article class="artifact-card"><p>${esc(task.handoff.instructions)}</p><small>Native app owns this conversation. Return by importing its latest context into a fresh linked continuation.</small>${task.application==='claude-code'?'<br><button data-action="open-claude">Open Claude ↗</button>':''}</article>`;
   const p=task?.pending[0];$('#scene-question').innerHTML=questionHtml(p);
-  let actions=scene.entry?'<button class="primary-action" data-entry="queue">Start the queue <span>→</span></button>'+ (scene.entry!=='add'?'<button data-entry="add">Add a task</button>':'')+(scene.entry!=='find'?'<button data-entry="find">Find a conversation</button>':''):'';
+  let actions='';
   if(task&&!task.isConductor){const url=sourceUrl(task);
     if(p?.kind==='approval'){if(p.sourceOnly){if(url)actions+=`<a class="primary-action" ${task.capabilities?.bridged?`data-reveal="${task.id}"`:""} href="${esc(url)}">Review in ${applicationInfo(task).name} ↗</a>`;}else{if(!/permissions\/requestApproval/.test(p.method))actions+='<button class="primary-action" data-action="approve">Approve this once ↗</button>';actions+='<button data-action="decline">Decline</button>';}}
     else if(url)actions+=`<a class="primary-action" ${!task.external?`data-native-handoff="${task.id}"`:task.capabilities?.bridged?`data-reveal="${task.id}"`:""} href="${esc(url)}">Open in ${applicationInfo(task).name} ↗</a>`;

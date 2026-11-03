@@ -42,14 +42,10 @@ input,textarea,select{border:1px solid #ffffff15;background:#ffffff05;color:#fff
 .brief-choice h3{font-size:11px;font-weight:500;color:#ffffff8c;margin:0 0 9px}.brief-choice p{font-size:15px;line-height:1.65;color:#ffffffd0;margin:5px 0}.brief-choice blockquote{margin:8px 0}
 .notice button{margin-left:14px;text-decoration:underline;text-underline-offset:3px}
 
-/* A conversational entrance, with one clear primary action. */
+/* The entry greeting is spoken; the room waits for a complete thought. */
 .room-entry .scene{max-width:760px;text-align:center;overflow:visible}
-.room-entry .scene h1{font-size:clamp(44px,6vw,76px);letter-spacing:-2.5px;margin-bottom:25px;font-weight:250}
-.room-entry .scene-body{max-width:none;color:#ffffffa6;font-size:21px;line-height:1.6}
-.room-entry .scene-body p{margin:0}
-.room-entry .scene-actions{justify-content:center;gap:28px;margin-top:42px}
-.room-entry .scene-actions>button{font-size:12px;padding:10px 0}
-.room-entry .scene-actions .primary-action{border:1px solid #ffffff38;border-radius:24px;padding:11px 19px;background:#ffffff0a}
-.room-entry .primary-action span{margin-left:14px;color:#ffffff8c}
+.room-entry .scene h1{font-size:clamp(44px,6vw,76px);letter-spacing:-2.5px;margin:0;font-weight:250}
+.room-entry .scene-body:empty,.room-entry .scene-actions:empty{display:none}
+.room-entry .scene-actions{justify-content:center;margin-top:28px}
 .room-entry #source-detail{display:none}
-@media(max-width:560px){.room-entry .scene h1{font-size:42px;letter-spacing:-1.5px}.room-entry .scene-body{font-size:18px}.room-entry .scene-actions{gap:14px 22px;margin-top:30px}.room-entry .scene-actions>button{font-size:11px}}
+@media(max-width:560px){.room-entry .scene h1{font-size:42px;letter-spacing:-1.5px}}

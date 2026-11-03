@@ -89,10 +89,10 @@ export function taskBrief(scene,task){
 
 // Entry choices are navigation, never authorization to dispatch an agent.
 export function entryScene(name = '', mode = 'greeting') {
-  if (mode === 'add') return { entry: 'add', title: 'What would you like to work on?', body: 'Tell me the whole thought.', spoken: 'What would you like to work on? Tell me the whole thought.', needsReply: true, advance: false };
-  if (mode === 'find') return { entry: 'find', title: 'Which conversation should we find?', body: 'Tell me the topic and where you were working.', spoken: 'Which conversation should we find? Tell me the topic and where you were working.', needsReply: true, advance: false };
+  if (mode === 'add') return { entry: 'add', title: 'A new task.', body: '', spoken: 'What would you like to work on? Tell me the whole thought.', needsReply: true, advance: false };
+  if (mode === 'find') return { entry: 'find', title: 'Find a conversation.', body: '', spoken: 'Which conversation should we find? Tell me the topic and where you were working.', needsReply: true, advance: false };
   const hello = name.trim() ? `Hello ${name.trim()}` : 'Hello';
-  return { entry: 'greeting', title: `${hello}.`, body: 'What should we do?', spoken: `${hello}, what should we do?`, needsReply: true, advance: false };
+  return { entry: 'greeting', title: `${hello}.`, body: '', spoken: name.trim() ? `Hello ${name.trim()}, what’s on your mind?` : 'Hello, what’s on your mind?', needsReply: true, advance: false };
 }
 export function entryIntent(text = '') {
   const words = text.trim().toLowerCase().replace(/[.!?]+$/, '').replace(/^hey[, ]+/, '').replace(/^(?:please |let[’']s )/, '').replace(/ please$/, '');

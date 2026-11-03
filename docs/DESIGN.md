@@ -9,7 +9,7 @@ Stageshow concerns product illustrations and demos. Its applicable principles ar
 | Area | Finding | Decision |
 | --- | --- | --- |
 | Room | The landscape and single scene provide a quiet, recognizable identity. | Keep the full-window composition and native window chrome. |
-| Entrance | Space previously chose a task before the user expressed an intention. | Open a brief spoken greeting and three clear actions. Starting the queue is the primary action. |
+| Entrance | Space previously chose a task before the user expressed an intention. | Open a brief spoken greeting, with the next step expressed through voice or chat. No written question or workflow buttons compete with the conversation. |
 | Hierarchy | Long first-visit context could compete with the immediate decision. | Keep return visits short. Keep actual alternatives outside the summary budget. |
 | Queue | Controls and source metadata can become crowded. | Retain a vertical drawer, expose management on demand, keep task title strongest. |
 | Settings | Many capabilities compete for space. | Keep progressive disclosure; preserve the four existing groups. No dashboard or second navigation system. |
