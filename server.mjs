@@ -40,7 +40,7 @@ const speech = new Speech();
 await speech.initialize().catch(() => {});
 const clients = new Set();
 const token = randomBytes(32).toString('hex');
-const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon' };
+const mime = { '.svg':'image/svg+xml', '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon' };
 function send(res, status, data) { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); }
 function broadcast(type, data) { for (const res of clients) res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); }
 engine.on('change', () => broadcast('state', { ...engine.state(), speech: speech.state() }));
@@ -106,6 +106,8 @@ const server = createServer(async (req, res) => {
         return send(res, 200, await engine.models());
       }
       if (url.pathname === '/api/rotation') return send(res, 200, engine.setRotation(b.mode));
+      if(url.pathname==='/api/order/chats')return send(res,200,engine.orderChats(b.projectKey,b.ids,b.revision));
+      if(url.pathname==='/api/order/projects')return send(res,200,engine.orderProjects(b.keys,b.revision));
       if (url.pathname === '/api/order') {
         const state = engine.state();
         const ids = Array.isArray(b.ids) && b.ids.length ? mergeRotationOrder(state.tasks, b.ids, state.rotationMode) : b.ids;

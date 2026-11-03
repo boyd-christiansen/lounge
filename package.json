@@ -1,6 +1,6 @@
 {
   "name": "command-lounge",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "A durable attention queue and voice-friendly command center for parallel agents.",
@@ -11,7 +11,7 @@
     "start": "node --disable-warning=ExperimentalWarning server.mjs",
     "build:desktop": "node scripts/build-desktop-bridge.mjs",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.mjs",
-    "check": "node --check server.mjs && node --check lib/briefing.mjs && node --check lib/migration.mjs && node --check lib/store.mjs && node --check lib/codex.mjs && node --check lib/engine.mjs && node --check lib/providers.mjs && node --check lib/adapters/codex.mjs && node --check lib/adapters/local.mjs && node --check lib/adapters/claude-code.mjs && node --check lib/channel.mjs && node --check lib/workspace.mjs && node --check public/applications.js && node --check lib/context.mjs && node --check lib/portable.mjs && node --check lib/prompting.mjs && node --check lib/speech.mjs && node --check public/rotation.js && node --check public/flow.js && node --check public/app.js && node --check lib/desktop/native.mjs && node --check lib/desktop/claude.mjs && node --check scripts/build-desktop-bridge.mjs && node --check lib/desktop/host.mjs && node --check lib/adapters/desktop.mjs && node --check lib/instance.mjs && node --check scripts/build-mac-app.mjs && node --check scripts/check-public.mjs",
+    "check": "node --check server.mjs && node --check lib/briefing.mjs && node --check lib/migration.mjs && node --check lib/store.mjs && node --check lib/codex.mjs && node --check lib/engine.mjs && node --check lib/providers.mjs && node --check lib/adapters/codex.mjs && node --check lib/adapters/local.mjs && node --check lib/adapters/claude-code.mjs && node --check lib/channel.mjs && node --check lib/workspace.mjs && node --check public/applications.js && node --check lib/context.mjs && node --check lib/portable.mjs && node --check lib/prompting.mjs && node --check lib/speech.mjs && node --check public/rotation.js && node --check public/flow.js && node --check public/icons.js && node --check public/app.js && node --check lib/desktop/native.mjs && node --check lib/desktop/claude.mjs && node --check scripts/build-desktop-bridge.mjs && node --check lib/desktop/host.mjs && node --check lib/adapters/desktop.mjs && node --check lib/instance.mjs && node --check scripts/build-mac-app.mjs && node --check scripts/check-public.mjs",
     "build:mac": "node scripts/build-mac-app.mjs",
     "check:public": "node scripts/check-public.mjs"
   },

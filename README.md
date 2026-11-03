@@ -34,7 +34,7 @@ Development data lives in ignored `data/`. The installed app uses `~/Library/App
 
 - Dictate with your existing Wispr shortcut. A completed paste into the focused room submits automatically; typing waits for Enter. Escape holds a pending submission. Microphone capture submits after an explicit stop, never after silence.
 - Start the queue to hear a prepared brief. Returning to a task emphasizes what changed and what needs deciding. Actual alternatives remain visible and are read aloud.
-- Drag queue handles to reorder; Alt+Up/Down also works. **Focus top task** selects the first eligible task. New results preserve the current draft and question.
+- The queue is project-first: **P1, P2…**, then chats inside each project. Drag a project handle to move the whole group, or a chat handle to reorder inside that project. Alt+Up/Down also works. Disclosure bars collapse without pausing work. **Focus top task** selects the first eligible chat in project order. New results preserve the current draft and question.
 - Use a task’s **···** menu to mark it Work/Personal or Remove from queue. Removal has Undo and preserves the original conversation. Moving on never clears a task.
 - Ask to snooze a task or change which project categories enter rotation. Settings → Flow also selects All, Work only or Personal only. Cmd+Shift+P toggles Work only/All.
 - Ask to find an existing conversation. Review its preview before import. Bringing it fully into Lounge creates a linked continuation in a supported agent runtime; it does not bulk-migrate or overwrite the original.
@@ -66,5 +66,7 @@ npm run check:public
 ```
 
 [Architecture](docs/ARCHITECTURE.md) · [Design review](docs/DESIGN.md) · [Prompt routing](docs/PROMPTING.md) · [Progress](docs/PROGRESS.md)
+
+Project priorities and chat order persist independently and are included in exports. Voice requests can use the same project/chat ordering tools. Personal filters and snooze retain hidden positions. Settings use one open section at a time, keep Save visible, and preserve unsaved edits when closed.
 
 The public branch starts from a clean source baseline. Private pre-publication history stays local and must not be merged or pushed. Commit focused changes after verification. Photo and icon credits are in [assets/CREDITS.md](public/assets/CREDITS.md).

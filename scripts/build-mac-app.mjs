@@ -1,9 +1,10 @@
 import {execFileSync} from 'node:child_process';
-import {mkdirSync,cpSync,copyFileSync,writeFileSync,existsSync,rmSync} from 'node:fs';
+import {mkdirSync,cpSync,copyFileSync,writeFileSync,readFileSync,existsSync,rmSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {resolve,dirname,join} from 'node:path';
 if(process.platform!=='darwin')throw new Error('Lounge.app builds on macOS.');
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..'),bundle=resolve(root,'dist/Lounge.app');
+const version=JSON.parse(readFileSync(join(root,'package.json'),'utf8')).version;
 // Only public application code/dependencies are packaged. Never copy data, .env,
 // provider profiles, home directories or repository metadata into the app.
 rmSync(bundle,{recursive:true,force:true});
@@ -21,7 +22,7 @@ for(const size of [16,32,128,256,512])for(const scale of [1,2]){
 }
 execFileSync('iconutil',['-c','icns',iconset,'-o',join(bundle,'Contents/Resources/Lounge.icns')]);
 rmSync(iconset,{recursive:true,force:true});
-writeFileSync(join(bundle,'Contents/Info.plist'),`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>local.commandlounge.app</string><key>CFBundleName</key><string>Lounge</string><key>CFBundleDisplayName</key><string>Lounge</string><key>CFBundleExecutable</key><string>Lounge</string><key>CFBundleIconFile</key><string>Lounge.icns</string><key>CFBundleVersion</key><string>1</string><key>CFBundleShortVersionString</key><string>0.4.0</string><key>CFBundlePackageType</key><string>APPL</string><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSHighResolutionCapable</key><true/><key>NSMicrophoneUsageDescription</key><string>Dictate complete thoughts to Lounge.</string><key>NSAccessibilityUsageDescription</key><string>Control existing conversations in the Claude app.</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict></dict></plist>`);
+writeFileSync(join(bundle,'Contents/Info.plist'),`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>local.commandlounge.app</string><key>CFBundleName</key><string>Lounge</string><key>CFBundleDisplayName</key><string>Lounge</string><key>CFBundleExecutable</key><string>Lounge</string><key>CFBundleIconFile</key><string>Lounge.icns</string><key>CFBundleVersion</key><string>${version}</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundlePackageType</key><string>APPL</string><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSHighResolutionCapable</key><true/><key>NSMicrophoneUsageDescription</key><string>Dictate complete thoughts to Lounge.</string><key>NSAccessibilityUsageDescription</key><string>Control existing conversations in the Claude app.</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict></dict></plist>`);
 execFileSync('xcrun',['swiftc','-O','-module-cache-path','/private/tmp/command-lounge-swift-cache',join(root,'native/DesktopBridge.swift'),join(root,'native/LoungeApp.swift'),'-o',join(executable,'Lounge')],{stdio:'inherit'});
 execFileSync('codesign',['--force','--sign','-',join(executable,'node')],{stdio:'inherit'});
 execFileSync('codesign',['--force','--deep','--sign','-','--identifier','local.commandlounge.app',bundle],{stdio:'inherit'});

@@ -1,10 +1,12 @@
 import { fingerprint, pickNext, sourceUrl, isDictationCommit, parseScene, normalizeScene, assertDraftTarget, queuePreview, renderMarkdown, briefingNarration, canRefocus, acceptsRoomPaste, taskBrief, entryScene, entryIntent, maySurfaceQueue } from './flow.js';
-import { inRotation, rotationTasks } from './rotation.js';
+import { icon } from './icons.js';
+import { inRotation, rotationTasks, projectGroups } from './rotation.js';
 import { applicationInfo } from './applications.js';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeLoad = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } };
 let state = {tasks:[],projects:[],profile:{},connection:{},queueOrder:[],orderRevision:0}, token, session = false, currentId = null, currentScene = null, busy = false, speechActive = false, soundGeneration = 0, recognition, recording = false, voiceSession = null, pendingConductor = null, pendingAutoAdvance = false, generation = 0,managedQueueId=null;
+let settingsDirty=false,settingsEditVersion=0;
 let drawerPinned = false, hoverTimer, closeTimer, noticeTimer, autoSendTimer, advanceTimer, dragId, lastPasteAt = 0, lastManualKeyAt = 0, lastValue = '';
 let voiceAudio = null, voiceAbort = null, voiceUrl = null, audioContext=null, audioSource=null, queuedPaste=false, firstBrief=true,queueStarted=false;
 const sceneCache=new Map(), audioCache=new Map(), audioErrors=new Set();let warming=false,greetingAudioWarmed=false,explicitVoiceRetry=false,voiceFailure=null;
@@ -33,6 +35,7 @@ function safeToRefocus(){return canRefocus({busy,recording,pendingConductor,text
 let importPreview=null;
 const presentedTasks=new Set();
 const seen = {}, drafts = safeLoad('lounge-room-drafts', {}), questionDrafts = safeLoad('lounge-room-answers', {});
+const savedCollapsed=safeLoad('lounge-collapsed-projects',[]),collapsedProjects=new Set(Array.isArray(savedCollapsed)?savedCollapsed:[]);
 const silentPreview = new URLSearchParams(location.search).has('silent');
 const currentTask = () => state.tasks.find(t => t.id === currentId);
 const conductor = () => state.tasks.find(t => t.isConductor);
@@ -82,23 +85,52 @@ function renderChrome() {
   const desktop=state.desktop;$('#desktop-status').textContent=desktop?.ready?'Connected · existing Claude conversations':desktop?.error||(desktop?.available?(desktop.permission?'Ready to connect':'Enable Lounge in macOS Accessibility settings'):'Open Lounge.app for existing-chat control');
   $('#connect-desktop').textContent=desktop?.ready?'Reconnect ↗':desktop?.permission?'Connect ↗':'Enable ↗';$('#connect-desktop').disabled=!desktop?.available;
   $('#disconnect-desktop').hidden=!desktop?.ready;
-  $('#sound').textContent=state.profile.autoRead?'◖))':'◖×';
+  $('#sound').innerHTML=icon(state.profile.autoRead?'speaker-wave':'speaker-x-mark');
   $('#sound').setAttribute('aria-label',state.profile.autoRead?'Mute read-aloud':'Enable read-aloud');
   if(!dragId)renderQueue();
   offerConductorQuestion();
 }
 function offerConductorQuestion(){if(currentScene?.entry&&conductor()?.pending?.length&&!$('#waiting-question'))$('#scene-actions').insertAdjacentHTML('beforeend','<button id="waiting-question" data-entry="question">Hear waiting question ↗</button>');}
-function renderQueue() {
-  $('#automatic-order').hidden=!state.queueOrder.length;
-  $('#queue-list').innerHTML=openTasks().map(t=>{
-    const url=sourceUrl(t), preview=queuePreview(t);
-    const copy=`<strong>${esc(t.title)}</strong><small><span class="task-status-dot ${esc(t.status)}"></span>${esc(applicationInfo(t).name)} <span>·</span> ${esc(projectName(t))}${t.isPersonal?' <span class="personal-label">Personal</span>':''} <span>·</span> ${esc(stateLabel(t))}</small>`;
-    return `<li class="queue-item ${t.id===currentId?'focused':''}" data-task="${t.id}"><div class="queue-item-main"><button class="drag-handle" draggable="true" data-drag="${t.id}" aria-label="Move ${esc(t.title)}" title="Drag to reorder · Alt + arrow keys">⠿</button>${url?`<a class="task-copy" ${!t.external?`data-native-handoff="${t.id}"`:t.capabilities?.bridged?`data-reveal="${t.id}"`:""} href="${esc(url)}" title="Open ${esc(t.sourceTitle||t.title)} in its source app">${copy}</a>`:`<button class="task-copy" data-focus="${t.id}">${copy}</button>`}<button class="queue-more" data-manage="${t.id}" aria-label="Options for ${esc(t.title)}" aria-expanded="${managedQueueId===t.id}">···</button><button class="source-link" data-focus="${t.id}" aria-label="Bring ${esc(t.title)} into focus" title="Bring into focus">⌁</button></div>${managedQueueId===t.id?`<div class="queue-actions"><span>This task</span><button data-queue-action="work" data-task-id="${t.id}" aria-pressed="${!t.isPersonal}">Work</button><button data-queue-action="personal" data-task-id="${t.id}" aria-pressed="${!!t.isPersonal}">Personal</button><button data-queue-action="remove" data-task-id="${t.id}" ${['running','waiting'].includes(t.status)?'disabled title="Pause this task before removing it"':''}>Remove from queue</button></div>`:''}<div class="task-peek"><p>${esc(preview.overview)}</p>${preview.status?`<p>${esc(preview.status)}</p>`:''}</div></li>`;
-  }).join('') || '<li class="empty-queue">Nothing in this rotation.</li>';
+function queueGroups(){return projectGroups(state.tasks,{mode:state.rotationMode,projectOrder:state.projectOrder||[],projects:state.projects});}
+function taskRow(t,{standalone=false,rank=0}={}){
+  const url=sourceUrl(t),drag=standalone?`data-drag-project="${esc(t.projectKey)}"`:`data-drag="${esc(t.id)}"`,copy=`<strong>${esc(t.title)}</strong><small><span class="task-status-dot ${esc(t.status)}"></span><span>${esc(applicationInfo(t).name)}</span><span aria-hidden="true">·</span><span>${esc(stateLabel(t))}</span>${t.isPersonal?'<span class="personal-label">Personal</span>':''}</small>`;
+  const attributes=!t.external?`data-native-handoff="${esc(t.id)}"`:t.capabilities?.bridged?`data-reveal="${esc(t.id)}"`:'';
+  return `<li class="queue-item ${t.id===currentId?'focused':''} ${standalone?'standalone-task':''}" data-task="${esc(t.id)}" data-project-key="${esc(t.projectKey)}"><div class="queue-item-main">${standalone?`<span class="project-rank">P${rank}</span>`:''}<button class="drag-handle" draggable="true" ${drag} aria-label="Move ${esc(t.title)}${standalone?' in project priority':''}" title="Drag to reorder · Alt + arrow keys">${icon('bars-2')}</button>${url?`<a class="task-copy" ${attributes} href="${esc(url)}" title="Open ${esc(t.sourceTitle||t.title)} in its source app">${copy}</a>`:`<button class="task-copy" data-focus="${esc(t.id)}">${copy}</button>`}<button class="queue-more" data-manage="${esc(t.id)}" aria-label="Options for ${esc(t.title)}" aria-expanded="${managedQueueId===t.id}">${icon('ellipsis-horizontal')}</button><button class="source-link" data-focus="${esc(t.id)}" aria-label="Bring ${esc(t.title)} into focus" title="Bring into focus">${icon('arrow-up-right')}</button></div>${managedQueueId===t.id?`<div class="queue-actions"><button data-queue-action="work" data-task-id="${esc(t.id)}" aria-pressed="${!t.isPersonal}">Work</button><button data-queue-action="personal" data-task-id="${esc(t.id)}" aria-pressed="${!!t.isPersonal}">Personal</button><button data-queue-action="remove" data-task-id="${esc(t.id)}" ${['running','waiting'].includes(t.status)?'disabled title="Pause this task before removing it"':''}>Remove from queue</button></div>`:''}</li>`;
 }
+let lastQueueHtml='',previewAnchor=null;
+function renderQueue(){
+  $('#automatic-order').hidden=!(state.queueOrder.length||state.projectOrder?.length);
+  const html=queueGroups().map((group,index)=>{
+    if(group.standalone)return `<li class="project-group standalone" data-project-group="${esc(group.key)}"><ol>${taskRow(group.tasks[0],{standalone:true,rank:index+1})}</ol></li>`;
+    const collapsed=collapsedProjects.has(group.key),id=`project-chats-${index}`;
+    return `<li class="project-group ${group.tasks.some(t=>t.id===currentId)?'has-focus':''}" data-project-group="${esc(group.key)}"><div class="project-header"><span class="project-rank">P${index+1}</span><button class="drag-handle" draggable="true" data-drag-project="${esc(group.key)}" aria-label="Move project ${esc(group.name)}" title="Project priority · Drag or Alt + arrow keys">${icon('bars-2')}</button><button class="project-toggle" data-collapse-project="${esc(group.key)}" aria-expanded="${!collapsed}" aria-controls="${id}"><span>${esc(group.name)}</span>${icon('chevron-down')}</button></div><ol id="${id}" class="project-chats" ${collapsed?'hidden':''}>${group.tasks.map(t=>taskRow(t)).join('')}</ol></li>`;
+  }).join('')||'<li class="empty-queue">Nothing in this rotation.</li>';
+  if(html===lastQueueHtml)return;
+  hideQueuePreview();$('#queue-list').innerHTML=html;lastQueueHtml=html;
+}
+function hideQueuePreview(){previewAnchor?.removeAttribute('aria-describedby');previewAnchor=null;$('#queue-preview').hidden=true;}
+function showQueuePreview(row){
+  if(!row||dragId||!document.body.classList.contains('drawer-open')||!$('#settings-view').hidden)return hideQueuePreview();
+  const task=state.tasks.find(t=>t.id===row.dataset.task);if(!task)return hideQueuePreview();
+  const preview=queuePreview(task);if(!preview.overview&&!preview.status)return hideQueuePreview();
+  previewAnchor?.removeAttribute('aria-describedby');previewAnchor=row.contains(document.activeElement)?document.activeElement:row.querySelector('.task-copy');previewAnchor?.setAttribute('aria-describedby','queue-preview');
+  const popup=$('#queue-preview');$('#queue-preview-title').textContent=task.title;$('#queue-preview-overview').textContent=preview.overview;$('#queue-preview-status').textContent=preview.status;popup.hidden=false;
+  const anchor=row.getBoundingClientRect(),edge=$('#drawer').getBoundingClientRect().right,width=popup.getBoundingClientRect().width;
+  popup.style.left=`${edge+width+32<=innerWidth?edge+16:Math.max(16,innerWidth-width-16)}px`;
+  popup.style.top=`${Math.max(16,Math.min(anchor.top,innerHeight-popup.getBoundingClientRect().height-16))}px`;
+}
+$('#queue-list').addEventListener('pointerover',e=>showQueuePreview(e.target.closest('.queue-item')));
+$('#queue-list').addEventListener('pointerout',e=>{if(!e.relatedTarget?.closest?.('.queue-item')||e.relatedTarget.closest('.queue-item')!==e.target.closest('.queue-item'))hideQueuePreview();});
+$('#queue-list').addEventListener('focusin',e=>showQueuePreview(e.target.closest('.queue-item')));
+$('#queue-list').addEventListener('focusout',e=>{if(!e.relatedTarget?.closest?.('.queue-item'))hideQueuePreview();});
+$('#queue-list').addEventListener('click',e=>{
+  const button=e.target.closest('[data-collapse-project]');if(!button)return;
+  const key=button.dataset.collapseProject;collapsedProjects.has(key)?collapsedProjects.delete(key):collapsedProjects.add(key);
+  localStorage.setItem('lounge-collapsed-projects',JSON.stringify([...collapsedProjects]));renderQueue();$(`[data-collapse-project="${CSS.escape(key)}"]`)?.focus();
+});
 function openDrawer(pin=false) { clearTimeout(hoverTimer);clearTimeout(closeTimer);drawerPinned=pin;document.body.classList.add('drawer-open');$('#drawer').inert=false;$('#queue-edge').setAttribute('aria-expanded','true');$('#drawer-scrim').hidden=false; }
-function closeDrawer() { clearTimeout(closeTimer);drawerPinned=false;document.body.classList.remove('drawer-open');$('#drawer').inert=true;$('#queue-edge').setAttribute('aria-expanded','false');$('#drawer-scrim').hidden=true;if(session)$('#thought').focus({preventScroll:true}); }
-function settings(show) { $('#queue-view').hidden=show;$('#settings-view').hidden=!show;$('#drawer-title').textContent=show?'Settings':'Your queue';$('#settings-toggle').innerHTML=show?'← Your queue':'<span>⚙</span> Settings & memory';if(show)fillSettings(); }
+function closeDrawer() { hideQueuePreview();clearTimeout(closeTimer);drawerPinned=false;document.body.classList.remove('drawer-open');$('#drawer').inert=true;$('#queue-edge').setAttribute('aria-expanded','false');$('#drawer-scrim').hidden=true;if(session)$('#thought').focus({preventScroll:true}); }
+function settings(show) { hideQueuePreview(); $('#queue-view').hidden=show;$('#settings-view').hidden=!show;$('#drawer-title').textContent=show?'Settings':'Your queue';$('#settings-toggle').innerHTML=show?icon('arrow-left')+'Your queue':icon('cog-6-tooth')+'Settings & memory';if(show)fillSettings(); }
 function populateVoices() {
   const voices='speechSynthesis' in window ? speechSynthesis.getVoices().filter(v=>v.lang.startsWith('en')&&(/premium|enhanced|natural/i.test(v.name)||['Samantha','Daniel','Karen','Moira','Tessa','Rishi',state.profile.voiceName].includes(v.name))):[];
   const value=$('#voice-name').value||state.profile.voiceName||'';
@@ -106,6 +138,8 @@ function populateVoices() {
   $('#voice-name').value=value;
 }
 function fillSettings() {
+  if(settingsDirty)return;
+  $('#save-preferences').disabled=true;
   const p=state.profile;$('#profile-name').value=p.name||'';$('#profile-memories').value=(p.memories||[]).join('\n');$('#profile-personality').value=p.personality||'';
   $('#auto-read').checked=p.autoRead;$('#auto-send').checked=p.autoSend;$('#auto-advance').checked=p.autoAdvance;$('#voice-rate').value=String(p.voiceRate||1);$('#voice-tone').value=p.voiceTone||'natural';$('#prompt-policy').value=p.promptPolicy||'smart';populateVoices();$('#voice-name').value=p.voiceName||'';
   $('#voice-provider').value=p.voiceProvider||'system';fillNaturalVoices(p.naturalVoiceId);renderVoiceSettings();
@@ -147,6 +181,7 @@ function fillNaturalVoices(preferred=$('#natural-voice-name').value||state.profi
 function renderVoiceSettings(){
   const natural=$('#voice-provider').value==='elevenlabs', speech=state.speech||{};
   $('#natural-voice').hidden=!natural;$('#system-voice-label').hidden=natural;
+  if(!speech.ready||speech.error)$('#voice-service-details').open=true;
   $('#voice-connection-status').textContent=speech.error||(speech.ready?'Connected · AI-generated voice':'Connect ElevenLabs for natural read-aloud.');
   $('#voice-key-row').hidden=!!speech.configured||!!speech.ready;$('#voice-key-note').hidden=!!speech.configured||!!speech.ready;
   $('#disconnect-voice').hidden=!speech.configured&&!speech.ready;$('#reload-voices').hidden=!speech.configured;
@@ -209,9 +244,9 @@ function present(scene, task, {read=true,onEnd,narrate=false,next=false}={}) {
 }
 async function fetchState(){const next=await api('state');token=next.token;state=next;renderChrome();return state;}
 async function refreshLoaded(){const next=await api('session/refresh',{});state={...state,...next};renderChrome();if(next.refreshErrors?.length)notice('Some source chats could not be refreshed. Their saved context is still here.');}
-async function focusTask(id,{refresh=true}={}) {
+async function focusTask(id,{refresh=true,keepDrawer=false}={}) {
   if(busy)return;queueStarted=true;if(recording)stopMic(false);clearTimeout(autoSendTimer);clearTimeout(advanceTimer);stopSpeaking();persistDraft();
-  const run=++generation;setBusy(true);currentId=id;restoreDraft();closeDrawer();
+  const run=++generation;setBusy(true);currentId=id;restoreDraft();if(!keepDrawer)closeDrawer();
   showTransition('One moment.', 'Bringing this thread back into focus.');
   try{
     if(refresh)refreshLoaded().catch(()=>{});
@@ -346,7 +381,9 @@ $('#sound').onclick=async()=>{try{stopSpeaking();state.profile=await api('profil
 $('#fullscreen').onclick=async()=>{if(window.webkit?.messageHandlers?.loungeShell){window.webkit.messageHandlers.loungeShell.postMessage({action:'fullscreen'});return;}try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{notice('Fullscreen is available through your browser or app window controls.');}};
 $('#talk-about-queue').onclick=()=>openEntry('add');
 $('#scene-actions').addEventListener('click',e=>{const action=e.target.closest('[data-entry]')?.dataset.entry;if(!action||busy)return;if(action==='queue')nextTask({skipCurrent:false});else if(action==='question'){const t=conductor();if(t?.pending?.length)showConductorQuestion(t);}else openEntry(action);});
-$('#settings-form').onsubmit=async e=>{e.preventDefault();const previousVoice=JSON.stringify([state.profile.voiceProvider,state.profile.naturalVoiceId,state.profile.voiceTone,state.profile.voiceRate]);try{if($('#voice-provider').value==='elevenlabs'&&!state.speech?.ready)throw new Error('Connect ElevenLabs before choosing natural speech.');state.profile=await api('profile',{name:$('#profile-name').value,memories:$('#profile-memories').value.split('\n').filter(Boolean),personality:$('#profile-personality').value,autoRead:$('#auto-read').checked,autoSend:$('#auto-send').checked,autoAdvance:$('#auto-advance').checked,voiceName:$('#voice-name').value,voiceRate:Number($('#voice-rate').value),voiceTone:$('#voice-tone').value,voiceProvider:$('#voice-provider').value,naturalVoiceId:$('#natural-voice-name').value,promptPolicy:$('#prompt-policy').value});if(previousVoice!==JSON.stringify([state.profile.voiceProvider,state.profile.naturalVoiceId,state.profile.voiceTone,state.profile.voiceRate]))resetVoicePlayback();renderChrome();notice('I’ll remember.');}catch(error){notice(error.message);}};
+const preferenceFields=new Set(['profile-name','profile-memories','profile-personality','auto-read','auto-send','auto-advance','voice-name','voice-provider','natural-voice-name','voice-rate','voice-tone','prompt-policy']);
+$('#settings-form').addEventListener('input',e=>{if(preferenceFields.has(e.target.id)){settingsDirty=true;settingsEditVersion++;$('#save-preferences').disabled=false;}});
+$('#settings-form').onsubmit=async e=>{e.preventDefault();const savedEditVersion=settingsEditVersion;const previousVoice=JSON.stringify([state.profile.voiceProvider,state.profile.naturalVoiceId,state.profile.voiceTone,state.profile.voiceRate]);try{if($('#voice-provider').value==='elevenlabs'&&!state.speech?.ready)throw new Error('Connect ElevenLabs before choosing natural speech.');state.profile=await api('profile',{name:$('#profile-name').value,memories:$('#profile-memories').value.split('\n').filter(Boolean),personality:$('#profile-personality').value,autoRead:$('#auto-read').checked,autoSend:$('#auto-send').checked,autoAdvance:$('#auto-advance').checked,voiceName:$('#voice-name').value,voiceRate:Number($('#voice-rate').value),voiceTone:$('#voice-tone').value,voiceProvider:$('#voice-provider').value,naturalVoiceId:$('#natural-voice-name').value,promptPolicy:$('#prompt-policy').value});if(previousVoice!==JSON.stringify([state.profile.voiceProvider,state.profile.naturalVoiceId,state.profile.voiceTone,state.profile.voiceRate]))resetVoicePlayback();if(savedEditVersion===settingsEditVersion){settingsDirty=false;$('#save-preferences').disabled=true;}renderChrome();notice('I’ll remember.');}catch(error){notice(error.message);}};
 $('#voice-provider').onchange=renderVoiceSettings;
 for(const scope of ['coordinator','workers']){
   $(`#${scope}-model`).onchange=()=>fillEfforts(scope);
@@ -373,13 +410,42 @@ $('#disconnect-desktop').onclick=async()=>{try{await api('desktop/disconnect',{}
 $('#connect-codex').onclick=async()=>{try{await api('connect',{});await fetchState();notice('Codex is connected.');}catch(error){try{const result=await api('login',{});if(result.authUrl&&/^https:\/\//.test(result.authUrl)){$('#codex-status').innerHTML=`<a href="${esc(result.authUrl)}" target="_blank" rel="noopener noreferrer">Continue sign-in with OpenAI ↗</a>`;window.open(result.authUrl,'_blank','noopener');}notice('Use the OpenAI sign-in link here, then reconnect.');}catch{notice(error.message);}}};
 async function focusTop(){const task=openTasks().find(t=>t.status!=='running');if(!task)return notice('Your agents are working. I’ll bring back anything that needs you.');if(busy||recording||pendingConductor)return notice('Finish the current recording or agent exchange before changing focus.');if($('#thought').value.trim())notice('Your unfinished thought is saved with its task.');if(!session){session=true;$('#thought-area').hidden=false;unlockAudio();}await focusTask(task.id,{refresh:false});}
 $('#focus-top').onclick=focusTop;
-async function reorder(ids){await api('order',{ids,revision:state.orderRevision});await fetchState();warmUpcoming();const task=openTasks().find(t=>t.status!=='running');if(session&&queueStarted&&task&&task.id!==currentId){if(safeToRefocus())await focusTask(task.id,{refresh:false});else notice('Queue reordered. Your current thought stays here. Choose Focus top task when you’re ready.');}}
-$('#automatic-order').onclick=()=>reorder([]).then(()=>notice('Back to priority order.')).catch(e=>notice(e.message));
-$('#queue-list').addEventListener('dragstart',e=>{const handle=e.target.closest('[data-drag]');if(!handle)return;dragId=handle.dataset.drag;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',dragId);handle.closest('.queue-item').classList.add('dragging');});
-$('#queue-list').addEventListener('dragover',e=>{const item=e.target.closest('.queue-item');if(!dragId||!item)return;e.preventDefault();e.dataTransfer.dropEffect='move';for(const row of $('#queue-list').children)row.classList.remove('drop-before','drop-after');item.classList.add(e.clientY<item.getBoundingClientRect().top+item.getBoundingClientRect().height/2?'drop-before':'drop-after');});
-$('#queue-list').addEventListener('drop',async e=>{const item=e.target.closest('.queue-item');if(!dragId||!item)return;e.preventDefault();const id=dragId,target=item.dataset.task,after=item.classList.contains('drop-after');dragId=null;if(id===target)return renderQueue();const ids=openTasks().map(t=>t.id).filter(x=>x!==id);ids.splice(ids.indexOf(target)+(after?1:0),0,id);try{await reorder(ids);}catch(error){notice(error.message);renderQueue();}});
-$('#queue-list').addEventListener('dragend',()=>{dragId=null;renderQueue();});
-$('#queue-list').addEventListener('keydown',async e=>{const handle=e.target.closest('[data-drag]');if(!handle||!e.altKey||!['ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();const ids=openTasks().map(t=>t.id),i=ids.indexOf(handle.dataset.drag),j=i+(e.key==='ArrowUp'?-1:1);if(j<0||j>=ids.length)return;[ids[i],ids[j]]=[ids[j],ids[i]];try{await reorder(ids);$(`[data-drag="${handle.dataset.drag}"]`)?.focus();}catch(error){notice(error.message);}});
+async function afterReorder(){
+  await fetchState();warmUpcoming();const task=openTasks().find(t=>t.status!=='running');
+  if(session&&queueStarted&&task&&task.id!==currentId){if(safeToRefocus())await focusTask(task.id,{refresh:false,keepDrawer:true});else notice('Queue reordered. Your current thought stays here. Choose Focus top task when you’re ready.');}
+}
+async function reorderProjects(keys){await api('order/projects',{keys,revision:state.projectOrderRevision});await afterReorder();}
+async function reorderChats(projectKey,ids){await api('order/chats',{projectKey,ids,revision:state.orderRevision});await afterReorder();}
+$('#automatic-order').onclick=async()=>{try{await api('order/projects',{keys:[],revision:state.projectOrderRevision});await fetchState();await api('order',{ids:[],revision:state.orderRevision});await afterReorder();notice('Back to automatic priority.');}catch(error){notice(error.message);}};
+function moveBeforeOrAfter(ids,id,target,after){const result=ids.filter(key=>key!==id),index=result.indexOf(target);if(index<0)throw new Error('The queue changed. Try the move again.');result.splice(index+(after?1:0),0,id);return result;}
+function dragTarget(e){
+  if(!dragId)return null;
+  if(dragId.kind==='project')return e.target.closest('.project-group');
+  const row=e.target.closest('.queue-item');return row?.dataset.projectKey===dragId.projectKey?row:null;
+}
+$('#queue-list').addEventListener('dragstart',e=>{
+  const handle=e.target.closest('[data-drag-project],[data-drag]');if(!handle)return;
+  dragId=handle.dataset.dragProject?{kind:'project',key:handle.dataset.dragProject}:{kind:'chat',key:handle.dataset.drag,projectKey:handle.closest('.queue-item').dataset.projectKey};
+  hideQueuePreview();e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',JSON.stringify(dragId));
+  const row=handle.closest(dragId.kind==='project'?'.project-group':'.queue-item');row.classList.add('dragging');e.dataTransfer.setDragImage(row.querySelector('.project-header')||row.querySelector('.queue-item-main')||row,20,20);
+});
+$('#queue-list').addEventListener('dragover',e=>{
+  const row=dragTarget(e);for(const old of $('#queue-list').querySelectorAll('.drop-before,.drop-after'))old.classList.remove('drop-before','drop-after');if(!row)return;
+  e.preventDefault();e.dataTransfer.dropEffect='move';const rect=(row.querySelector('.project-header')||row).getBoundingClientRect();row.classList.add(e.clientY<rect.top+rect.height/2?'drop-before':'drop-after');
+});
+$('#queue-list').addEventListener('drop',async e=>{
+  const row=dragTarget(e);if(!dragId)return;e.preventDefault();const source=dragId;dragId=null;
+  if(!row){renderQueue();return notice('Chats stay in their project. Move the project heading to change its priority.');}
+  const target=source.kind==='project'?row.dataset.projectGroup:row.dataset.task,after=row.classList.contains('drop-after');lastQueueHtml='';
+  try{if(source.key!==target){if(source.kind==='project')await reorderProjects(moveBeforeOrAfter(queueGroups().map(g=>g.key),source.key,target,after));else{const group=queueGroups().find(g=>g.key===source.projectKey);await reorderChats(source.projectKey,moveBeforeOrAfter(group.tasks.map(t=>t.id),source.key,target,after));}}}catch(error){notice(error.message);}finally{renderQueue();}
+});
+$('#queue-list').addEventListener('dragend',()=>{dragId=null;lastQueueHtml='';renderQueue();});
+$('#queue-list').addEventListener('keydown',async e=>{
+  const handle=e.target.closest('[data-drag-project],[data-drag]');if(!handle||!e.altKey||!['ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();
+  const project=handle.dataset.dragProject,key=project||handle.dataset.drag,group=queueGroups().find(g=>g.key===handle.closest('.project-group').dataset.projectGroup);
+  const ids=project?queueGroups().map(g=>g.key):group.tasks.map(t=>t.id),i=ids.indexOf(key),j=i+(e.key==='ArrowUp'?-1:1);if(j<0||j>=ids.length)return;[ids[i],ids[j]]=[ids[j],ids[i]];
+  try{if(project)await reorderProjects(ids);else await reorderChats(group.key,ids);$(`[${project?'data-drag-project':'data-drag'}="${CSS.escape(key)}"]`)?.focus();}catch(error){notice(error.message);}
+});
 $('#scene-question').addEventListener('input',e=>{const id=e.target.dataset.qid,p=currentTask()?.pending[0];if(id&&p){questionDrafts[`${currentId}:${p.id}:${id}`]=e.target.value;localStorage.setItem('lounge-room-answers',JSON.stringify(questionDrafts));}});
 async function removeTask(id){
   await api(`tasks/${id}/clear`,{});managedQueueId=null;await fetchState();notice('Removed from the queue. The original conversation stays in its app.');

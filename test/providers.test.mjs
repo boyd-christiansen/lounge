@@ -177,7 +177,9 @@ test('context scopes stay separate and portable snapshots omit credentials and l
   store.update(task.id, { status: 'waiting', pending: [{ id: 'process-only' }], messages: [{ role: 'user', text: 'Private source context' }] });
   store.setMeta('credential-do-not-export', 'sentinel-secret');
   const source=store.create({title:'Existing source',projectId:'inbox'});store.update(source.id,{external:true,threadId:'original-source-id',runtimeProvider:'desktop',runtimeSessionId:'ephemeral-native-only',sourceControlReserved:true,observationReserved:true,status:'waiting'});
+  store.setMeta('projectOrder',[`task:${task.id}`]);store.setMeta('projectOrderRevision',3);
   const exported = portableSnapshot(store), value = JSON.stringify(exported);
+  assert.deepEqual(exported.configuration.projectOrder,[`task:${task.id}`]);assert.equal(exported.configuration.projectOrderRevision,3);
   assert.ok(!value.includes('sentinel-secret')); assert.ok(!value.includes('process-only'));
   assert.equal(exported.tasks[0].status, 'paused'); assert.ok(value.includes('A short project decision.'));
   assert.ok(!value.includes('ephemeral-native-only'));const savedSource=exported.tasks.find(t=>t.id===source.id);assert.equal(savedSource.threadId,'original-source-id');assert.equal(savedSource.status,'paused');assert.equal(savedSource.sourceControlReserved,false);assert.equal(savedSource.observationReserved,false);

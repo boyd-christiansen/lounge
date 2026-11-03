@@ -119,7 +119,7 @@ test('a new thought during a worker question goes to the conductor without answe
   const sent = JSON.parse(codex.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text);
   assert.equal(sent.currentTask.pending[0].question,'Which format?');assert.match(sent.userInstruction,/New task/);
   assert.equal(store.get(worker.id).status,'waiting');assert.equal(codex.replies.length,0);
-  assert.equal(result.toolVersion,10);store.close();
+  assert.equal(result.toolVersion,11);store.close();
 });
 test('conductor answers only the displayed question and preserves the exact complete thought', async () => {
   const { engine, store, codex } = fixture(), worker = engine.capture({ title: 'Worker' });

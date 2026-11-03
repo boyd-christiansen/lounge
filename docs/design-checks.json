@@ -1,0 +1,82 @@
+{
+  "checked": "2026-11-02",
+  "profile": "synthetic",
+  "delivery": {
+    "centerY": 398.5,
+    "fontSize": "13px",
+    "height": 36,
+    "left": 237.8984375,
+    "top": 380.5,
+    "width": 197.8984375
+  },
+  "fullscreen": {
+    "centerY": 44,
+    "fontSize": "16px",
+    "height": 32,
+    "left": 1212,
+    "top": 28,
+    "width": 32
+  },
+  "fullscreenIcon": {
+    "centerY": 44,
+    "fontSize": "16px",
+    "height": 18,
+    "left": 1219,
+    "top": 35,
+    "width": 18
+  },
+  "pace": {
+    "centerY": 398.5,
+    "fontSize": "13px",
+    "height": 36,
+    "left": 24,
+    "top": 380.5,
+    "width": 197.8984375
+  },
+  "save": {
+    "centerY": 621,
+    "fontSize": "12px",
+    "height": 36,
+    "left": 24,
+    "top": 603,
+    "width": 411.796875
+  },
+  "sound": {
+    "centerY": 44,
+    "fontSize": "16px",
+    "height": 32,
+    "left": 1172,
+    "top": 28,
+    "width": 32
+  },
+  "soundIcon": {
+    "centerY": 44,
+    "fontSize": "16px",
+    "height": 18,
+    "left": 1179,
+    "top": 35,
+    "width": 18
+  },
+  "viewport": {
+    "height": 720,
+    "width": 1280
+  },
+  "tooltip": {
+    "rowPositionsBefore": [
+      171,
+      238.34375
+    ],
+    "rowPositionsAfter": [
+      171,
+      238.34375
+    ],
+    "rowHeightsBefore": [
+      64.34375,
+      64.34375
+    ],
+    "rowHeightsAfter": [
+      64.34375,
+      64.34375
+    ]
+  }
+}

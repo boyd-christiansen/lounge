@@ -30,3 +30,32 @@ export function mergeRotationOrder(tasks, ids, mode = 'all') {
   let index = 0;
   return tasks.filter(t => !t.isConductor && t.status !== 'done').map(t => valid.has(t.id) ? ids[index++] : t.id);
 }
+
+// Project rank is the outer queue; the existing task order is local to a group.
+export function projectGroups(tasks, { mode = 'all', projectOrder = [], projects = [] } = {}) {
+  const groups = new Map();
+  for (const task of rotationTasks(tasks, mode)) {
+    const identity = projectIdentity(task, projects), key = task.projectKey || identity.key;
+    if (!groups.has(key)) groups.set(key, { key, name: task.projectName || identity.name, standalone: key.startsWith('task:'), tasks: [], score: -Infinity, position: groups.size });
+    const group = groups.get(key); group.tasks.push(task); group.score = Math.max(group.score, task.score || 0);
+  }
+  const order = new Map(projectOrder.map((key, index) => [key, index]));
+  return [...groups.values()].sort((a,b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity) || b.score - a.score || a.position - b.position);
+}
+export function orderProjectTasks(tasks, options = {}) {
+  const visible = projectGroups(tasks, options).flatMap(group => group.tasks), ids = new Set(visible.map(t => t.id));
+  return [...visible, ...tasks.filter(t => !ids.has(t.id))];
+}
+export function mergeProjectOrder(tasks, keys, options = {}) {
+  const visible = projectGroups(tasks, options), valid = new Set(visible.map(g => g.key));
+  if (!Array.isArray(keys) || keys.length !== valid.size || new Set(keys).size !== keys.length || keys.some(key => !valid.has(key))) throw Object.assign(new Error('The projects in this rotation changed. Try the move again.'), { status: 409 });
+  const existing=new Set(tasks.filter(t=>!t.isConductor&&t.status!=='done').map(t=>t.projectKey||projectIdentity(t,options.projects).key));
+  const all=[...new Set([...(options.projectOrder||[]).filter(key=>existing.has(key)),...projectGroups(tasks,{...options,mode:'all'}).map(g=>g.key),...existing])];let index=0;
+  return all.map(key=>valid.has(key)?keys[index++]:key);
+}
+export function reorderProjectChats(tasks, projectKey, ids, options = {}) {
+  const group = projectGroups(tasks, options).find(group => group.key === projectKey), valid = new Set(group?.tasks.map(t => t.id));
+  if (!group || !Array.isArray(ids) || ids.length !== valid.size || new Set(ids).size !== ids.length || ids.some(id => !valid.has(id))) throw Object.assign(new Error('The chats in this project changed. Try the move again.'), { status: 409 });
+  let index = 0;
+  return rotationTasks(tasks, options.mode).map(task => valid.has(task.id) ? ids[index++] : task.id);
+}
