@@ -1,0 +1,14 @@
+import {execFileSync} from 'node:child_process';
+import {mkdirSync,writeFileSync,chmodSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {resolve,dirname} from 'node:path';
+if(process.platform!=='darwin')throw new Error('The native desktop helper builds on macOS only.');
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const bundle=resolve(root,'data/native/Command Lounge Bridge.app');
+const directory=resolve(bundle,'Contents/MacOS');mkdirSync(directory,{recursive:true,mode:0o700});
+writeFileSync(resolve(bundle,'Contents/Info.plist'),`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>local.commandlounge.desktop-bridge</string><key>CFBundleName</key><string>Command Lounge Bridge</string><key>CFBundleExecutable</key><string>CommandLoungeBridge</string><key>CFBundleVersion</key><string>1</string><key>CFBundlePackageType</key><string>APPL</string><key>LSUIElement</key><true/></dict></plist>`,{mode:0o600});
+const binary=resolve(directory,'CommandLoungeBridge');
+execFileSync('xcrun',['swiftc','-O','-module-cache-path','/private/tmp/command-lounge-swift-cache',resolve(root,'native/DesktopBridge.swift'),resolve(root,'native/BridgeCLI.swift'),'-o',binary],{stdio:'inherit'});
+chmodSync(binary,0o700);
+execFileSync('codesign',['--force','--sign','-','--identifier','local.commandlounge.desktop-bridge',bundle],{stdio:'inherit'});
+console.log('Built local desktop helper. No Accessibility permission was requested and no app was controlled.');

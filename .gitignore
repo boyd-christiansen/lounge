@@ -1,0 +1,22 @@
+data/*
+!data/.gitkeep
+node_modules/
+.DS_Store
+.env
+*.log
+# Local secrets written by `elevenlabs onboard`
+/.env.local
+/dist/
+
+# Runtime/private artifacts and local tooling
+.env.*
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.lock.pid
+*.key
+*.pem
+*.p12
+*.pfx
+.DS_Store
