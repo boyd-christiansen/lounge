@@ -1,3 +1,4 @@
+import {shortcutEvent,isModifierCode,matchesShortcut,shortcutLabel,validateShortcut,transitionDecision} from './interaction.js';
 import { fingerprint, pickNext, sourceUrl, isDictationCommit, parseScene, normalizeScene, assertDraftTarget, queuePreview, renderMarkdown, briefingNarration, canRefocus, acceptsRoomPaste, taskBrief, entryScene, entryIntent, maySurfaceQueue } from './flow.js';
 import { icon } from './icons.js';
 import { createAutosave } from './autosave.js';
@@ -41,6 +42,7 @@ function savePreference(patch,debounce=false){
   const voiceChanged=['voiceProvider','naturalVoiceId','voiceTone','voiceRate','voiceName'].some(key=>key in patch&&patch[key]!==state.profile[key]);
   state.profile={...state.profile,...patch};if(patch.autoRead===false)stopSpeaking();if(voiceChanged)resetVoicePlayback();preferenceSaver.update(patch,{debounce});renderChrome();
 }
+let shortcutCapture=false,shortcutModifier=null,activeSubmission=null,cancellingThought=false,stopAwaiting=null;
 let drawerPinned = false, hoverTimer, closeTimer, noticeTimer, autoSendTimer, advanceTimer, dragId, lastPasteAt = 0, lastManualKeyAt = 0, lastValue = '';
 let voiceAudio = null, voiceAbort = null, voiceUrl = null, audioContext=null, audioSource=null, queuedPaste=false, firstBrief=true,queueStarted=false;
 const sceneCache=new Map(), audioCache=new Map(), audioErrors=new Set();let warming=false,greetingAudioWarmed=false,explicitVoiceRetry=false,voiceFailure=null;
@@ -74,7 +76,7 @@ const silentPreview = new URLSearchParams(location.search).has('silent');
 const currentTask = () => state.tasks.find(t => t.id === currentId);
 const conductor = () => state.tasks.find(t => t.isConductor);
 const openTasks = () => rotationTasks(state.tasks, state.rotationMode);
-const projectName = t => t.sourceProjectName || state.projects.find(p => p.path === t.sourceCwd || p.id === t.projectId)?.name || 'Your work';
+const projectName = t => t.projectName || t.queueProject?.name || t.sourceProjectName || state.projects.find(p => p.path === t.sourceCwd || p.id === t.projectId)?.name || 'Your work';
 const stateLabel = t => taskState(t).label;
 const markdown = renderMarkdown;
 async function api(path, data) {
@@ -82,9 +84,9 @@ async function api(path, data) {
   const value = await res.json(); if (!res.ok) throw new Error(value.error || 'Something interrupted the connection'); return value;
 }
 function notice(text) { $('#notice').textContent = text; $('#notice').classList.add('visible'); clearTimeout(noticeTimer); noticeTimer=setTimeout(()=>$('#notice').classList.remove('visible'),6500); }
-function setBusy(value) { busy=value; document.body.classList.toggle('busy',value); $('#thought-area').classList.toggle('sending',value); $('#submit-thought').disabled=value;if(!value&&queuedPaste){queuedPaste=false;scheduleSend();} }
+function setBusy(value) { busy=value; document.body.classList.toggle('busy',value); $('#thought-area').classList.toggle('sending',value); renderThoughtControl();if(!value&&queuedPaste){queuedPaste=false;scheduleSend();} }
 function showTransition(title, subtitle='Checking what has come back.') {
-  $('#welcome').hidden=true; $('#scene').hidden=true; $('#transition').hidden=false;
+  $('#review-response').hidden=true;$('.thinking-orbit').hidden=false;$('#welcome').hidden=true; $('#scene').hidden=true; $('#transition').hidden=false;
   $('#transition-text').textContent=title; $('#transition-subtext').textContent=subtitle;
 }
 function stopSpeaking() { soundGeneration++;if(audioSource){audioSource.onended=null;try{audioSource.stop();}catch{}audioSource=null;}voiceAbort?.abort(); voiceAbort=null; if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}if(voiceUrl){URL.revokeObjectURL(voiceUrl);voiceUrl=null;} if ('speechSynthesis' in window) speechSynthesis.cancel(); speechActive=false; document.body.classList.remove('speaking'); }
@@ -109,6 +111,7 @@ async function speak(text, onEnd, profile = state.profile) {
   utterance.onend=ended;utterance.onerror=()=>{if(run===soundGeneration)stopSpeaking();};speechSynthesis.speak(utterance);
 }
 function renderChrome() {
+  renderThoughtControl();syncNativeShortcut();
   $('#hello').textContent=entryScene(state.profile.name).title;
   $('#rotation-mode').value=state.rotationMode||'all';$('#queue-filter').value=state.rotationMode||'all';
   $('#codex-status').textContent=state.connection.state==='connected'?'Connected with your ChatGPT sign-in':'Use your existing ChatGPT sign-in';
@@ -136,8 +139,8 @@ function renderQueue(){
   const custom=!!(state.queueOrder.length||state.projectOrder?.length),mode=state.sortMode||'recent';
   $('#queue-sort').value=custom?'custom':mode;
   const detail={recent:'Projects with the latest conversation activity first; newest chats first inside each project.',oldest:'Projects whose latest conversation activity is oldest first; oldest chats first inside each project.',priority:'Urgency and due dates first, then waiting questions and time since attention. Projects use their highest-ranked chat.'};
-  $('#queue-sort-hint').textContent=custom?'Your dragged positions come first. Choose a sort to replace them.':detail[mode];
-  $('#queue-sort').title=(custom?'Dragged positions override the base sort. ':'')+detail[mode]+' Choosing a sort replaces custom positions.';
+  $('#queue-sort-hint').textContent=custom?'Your chosen positions come first. Choose a sort to replace them.':detail[mode];
+  $('#queue-sort').title=(custom?'Custom positions override the base sort. ':'')+detail[mode]+' Choosing a sort replaces custom positions.';
   const html=queueGroups().map((group,index)=>{
     if(group.standalone)return `<li class="project-group standalone" data-project-group="${esc(group.key)}"><ol>${taskRow(group.tasks[0],{standalone:true,rank:index+1})}</ol></li>`;
     const collapsed=collapsedProjects.has(group.key),id=`project-chats-${index}`;
@@ -176,6 +179,7 @@ function populateVoices() {
   $('#voice-name').value=value;
 }
 function fillSettings() {
+  renderDictationShortcut();
   const p=state.profile;$('#profile-name').value=p.name||'';$('#profile-memories').value=(p.memories||[]).join('\n');$('#profile-personality').value=p.personality||'';
   $('#auto-read').checked=p.autoRead;$('#auto-send').checked=p.autoSend;$('#auto-advance').checked=p.autoAdvance;$('#voice-rate').value=String(p.voiceRate||1);$('#voice-tone').value=p.voiceTone||'natural';$('#prompt-policy').value=p.promptPolicy||'smart';populateVoices();$('#voice-name').value=p.voiceName||'';
   $('#voice-provider').value=p.voiceProvider||'system';fillNaturalVoices(p.naturalVoiceId);renderVoiceSettings();
@@ -257,8 +261,9 @@ function present(scene, task, {read=true,onEnd,narrate=false,next=false}={}) {
   if(!batch&&task?.capabilities?.bridged)$('#scene-artifacts').innerHTML=(task.artifacts||[]).filter(a=>{try{const url=new URL(a.url);return url.protocol==='https:'&&url.hostname==='claude.ai'&&!url.username&&!url.password;}catch{return false;}}).map(a=>`<article class="artifact-card"><h3>${esc(a.title)}</h3><a href="${esc(a.url)}">View in Claude ↗</a></article>`).join('');
   if(scene.choices?.length)$('#scene-artifacts').innerHTML+='<div class="brief-choices">'+scene.choices.map((c,i)=>`<article class="brief-choice"><h3>Option ${i+1} · ${esc(c.label)}</h3>${markdown(c.quote)}</article>`).join('')+'</div>';
   else if(scene.choiceExcerpt)$('#scene-artifacts').innerHTML+=`<article class="brief-choice"><h3>Options from the source</h3>${markdown(scene.choiceExcerpt)}</article>`;
-  const migration=scene.migrationPreview || (task?.isConductor?task.migrationPreview:null);document.body.classList.toggle('import-preview',!!migration);
+  const migration=scene.migrationPreview || (task?.isConductor?task.migrationPreview:null);document.body.classList.toggle('import-preview',!!migration);document.body.classList.toggle('task-plan-scene',!!scene.taskPlan);
   if(migration)$('#scene-artifacts').innerHTML+=migrationCard(migration);
+  if(scene.taskPlan)$('#scene-artifacts').innerHTML+=taskPlanCard(scene.taskPlan);
   if(task?.handoff)$('#scene-artifacts').innerHTML+=`<article class="artifact-card"><p>${esc(task.handoff.instructions)}</p><small>Native app owns this conversation. Return by importing its latest context into a fresh linked continuation.</small>${task.application==='claude-code'?'<br><button data-action="open-claude">Open Claude ↗</button>':''}</article>`;
   const p=task?.pending[0];$('#scene-question').innerHTML=questionHtml(p);
   let actions='';
@@ -324,6 +329,7 @@ async function sendThought() {
   let text=$('#thought').value.trim();
   if(!text&&task?.pending[0]?.questions.length)text=task.pending[0].questions.map(q=>{const answer=$(`textarea[data-qid="${CSS.escape(q.id)}"]`)?.value||document.querySelector(`input[data-qid="${CSS.escape(q.id)}"]:checked`)?.value;return answer?`${q.question}\n${answer}`:'';}).filter(Boolean).join('\n\n');
   if(!text)return;
+  if(pendingConductor&&state.tasks.find(t=>t.id===pendingConductor)?.status==='review'){notice('Review the response before sending this thought. Your draft stays saved.');return;}
   if(pendingConductor&&currentId!==pendingConductor&&state.tasks.find(t=>t.id===pendingConductor)?.pending.length){notice('A new question is waiting. Choose “Hear the question” before answering it. Your current thought stays saved.');return;}
   persistDraft();const binding=drafts[key]?.binding;
   try{if(binding)assertDraftTarget(binding,task||conductor());}catch(error){notice(error.message);return;}
@@ -333,35 +339,107 @@ async function sendThought() {
   if(!task&&intent){clearSentDraft(key,text);openEntry(intent);return;}
   if(/^(next( task)?|move on|what[’']?s next|skip this)[.!?]?$/i.test(text)){clearSentDraft(key,text);await nextTask();return;}
   if(/^(open( this| the task)?|open (in )?(codex|chatgpt|claude))[.!?]?$/i.test(text)&&sourceUrl(task||{})){clearSentDraft(key,text);const link=$('#scene-actions a');if(link)link.click();return;}
-  setBusy(true);$('#input-hint').textContent='Thinking it through.';
+  const submission={id:crypto.randomUUID(),key,text,cancelled:false,sent:false};activeSubmission=submission;setBusy(true);$('#input-hint').textContent='Thinking it through.';
   try{
     await inferenceSaver.flush();if(inferenceSaver.error)throw new Error('The model preference has not saved. Retry it in Settings before starting the next turn.');
-    const result=await api('conductor',{text,taskId:task?.id,requestId:task?.pending[0]?.id||null,briefKey:currentScene?.briefKey||null});clearSentDraft(key,text);pendingConductor=result.id;
+    if(submission.cancelled)return;submission.sent=true;
+    const result=await api('conductor',{commandId:submission.id,text,taskId:task?.id,requestId:task?.pending[0]?.id||null,briefKey:currentScene?.briefKey||null});if(submission.cancelled)return;clearSentDraft(key,text);pendingConductor=result.id;
     showTransition('Thinking it through.','Your thought is with me.');
     await fetchState();consumeConductor();
-  }catch(error){setBusy(false);if(error.message.includes('coordinator question'))await fetchState().catch(()=>{});notice(error.message);}
-  finally{$('#input-hint').textContent='Your dictation shortcut works here.';}
+  }catch(error){if(submission.cancelled)return;activeSubmission=null;setBusy(false);if(error.message.includes('coordinator question'))await fetchState().catch(()=>{});notice(error.message);}
+  finally{if(!submission.cancelled)$('#input-hint').textContent='Your dictation shortcut works here.';}
 }
 function consumeConductor(){
+  if(cancellingThought||activeSubmission?.cancelled)return;
   if(!pendingConductor)return;const t=state.tasks.find(t=>t.id===pendingConductor);if(!t)return;
   if(t.status==='waiting'&&t.pending.length){
-    setBusy(false);
+    queuedPaste=false;cancelAutoSend();setBusy(false);
     if($('#thought').value.trim()||recording){
+      offerResponseReview(()=>{if(recording)stopMic(false);showConductorQuestion(t);});
       if(!$('#hear-question'))$('#scene-actions').insertAdjacentHTML('beforeend','<button id="hear-question" class="primary-action">Hear the question ↗</button>');
       $('#hear-question').onclick=()=>{if(recording)stopMic(false);showConductorQuestion(t);};
       notice('A question came back. Finish your thought; it stays saved here.');return;
     }
     showConductorQuestion(t);return;
   }
-  if(t.status==='error'||t.status==='paused'){pendingConductor=null;setBusy(false);present({title:'Let’s keep your place.',body:t.lastError||'The connection paused. Your thought is saved in this conversation.',spoken:'',needsReply:false,advance:false},currentTask(),{read:false});return;}
+  if(t.status==='error'||t.status==='paused'){activeSubmission=null;pendingConductor=null;setBusy(false);present({title:'Let’s keep your place.',body:t.lastError||'The connection paused. Your thought is saved in this conversation.',spoken:'',needsReply:false,advance:false},currentTask(),{read:false});return;}
   if(t.status!=='review'||!t.summary)return;
-  pendingConductor=null;setBusy(false);const scene=parseScene(t.summary);pendingAutoAdvance=!!(scene.advance&&state.profile.autoAdvance&&!scene.needsReply);
-  const moveOn=()=>{if(pendingAutoAdvance&&safeToRefocus()){pendingAutoAdvance=false;nextTask();}};
-  present({...scene,artifactBatch:t.artifactBatch,migrationPreview:t.migrationPreview},currentTask(),{onEnd:pendingAutoAdvance?moveOn:undefined});
+  if(($('#thought').value.trim()||recording)&&!t.resultAccepted){queuedPaste=false;cancelAutoSend();setBusy(false);offerResponseReview(()=>{persistDraft();if(recording)stopMic(false);consumeConductorResult(t);});if(!$('#hear-result'))$('#scene-actions').insertAdjacentHTML('beforeend','<button id="hear-result" class="primary-action">Review the response ↗</button>');$('#hear-result').onclick=()=>{persistDraft();if(recording)stopMic(false);consumeConductorResult(t);};notice('A response is ready. Your current thought stays saved.');return;}
+  consumeConductorResult(t);
 }
-function showConductorQuestion(t){pendingConductor=null;persistDraft();currentId=t.id;restoreDraft();const p=t.pending[0];present({title:p.question,body:p.context||'Take your time. I’m listening to the whole thought.',spoken:p.question,needsReply:true,advance:false},t);}
+function offerResponseReview(action){if($('#transition').hidden)return;$('#transition-text').textContent='A response is ready.';$('#transition-subtext').textContent='Your thought is held. Review before continuing.';$('.thinking-orbit').hidden=true;$('#review-response').hidden=false;$('#review-response').onclick=action;}
+function consumeConductorResult(t){
+  activeSubmission=null;pendingConductor=null;setBusy(false);const scene=parseScene(t.summary);
+  const decision=transitionDecision(scene,{instruction:t.routingContext?.userInstruction,actions:t.routingContext?.actions,activeTaskIds:state.tasks.filter(t=>t.status==='running'&&!t.isConductor).map(t=>t.id)});
+  if(decision==='ask'){scene.body=[scene.body,'Stay here or move to the next task?'].filter(Boolean).join('\n\n');scene.spoken=[scene.spoken,'Stay here or move to the next task?'].filter(Boolean).join(' ');scene.needsReply=true;}
+  pendingAutoAdvance=decision==='next'&&state.profile.autoAdvance;
+  const moveOn=()=>{if(pendingAutoAdvance&&safeToRefocus()){pendingAutoAdvance=false;nextTask();}};
+  const created=t.routingContext?.actions?.findLast(a=>a.tool==='lounge_capture'&&a.taskId);if(decision==='stay'&&created){persistDraft();currentId=created.taskId;restoreDraft();}
+  present({...scene,artifactBatch:t.artifactBatch,migrationPreview:t.migrationPreview,taskPlan:t.taskPlan?.status==='proposed'||t.routingContext?.actions?.some(a=>a.tool==='lounge_confirm_plan')?t.taskPlan:null},currentTask(),{onEnd:pendingAutoAdvance?moveOn:undefined});
+}
+function taskPlanCard(plan){
+  if(plan.status==='discarded')return'';
+  const proposed=plan.status==='proposed';
+  return `<section class="task-plan" aria-label="${proposed?'Proposed queue':'Added queue plan'}"><h2>${proposed?'Proposed queue':'Added to your queue'}</h2><p>${esc(plan.summary)}</p>${plan.projects.map(project=>`<div class="plan-project"><h3><span class="project-rank">P${project.position}</span>${esc(project.name)}</h3>${(plan.chatOrders[project.key]||[]).map((id,index)=>{const item=plan.items.find(i=>i.id===id);if(!item){const existing=state.tasks.find(t=>t.id===id);return existing?`<p class="existing-plan-task">${index+1}. ${esc(existing.title)} <span>Already queued</span></p>`:'';}return `<article class="plan-task"><h4>${index+1}. ${esc(item.title)}</h4><small>${esc(item.priority)} priority · ${esc(item.application==='claude-code'?'Claude Code':'Codex')}${item.personal===true?' · Personal':''}</small><p>${esc(item.brief)}</p>${item.workspaceUnassigned?'<p class="setting-note">Choose a workspace before starting this task.</p>':''}</article>`;}).join('')}${!project.newCount?'<p class="existing-plan-task">Existing project; its chats keep their order.</p>':''}</div>`).join('')}${proposed?`<p class="setting-note">Nothing starts when this is added. Revise the split or priorities by voice before approving.</p><div class="plan-actions"><button class="primary-action" data-confirm-plan="${esc(plan.id)}">Add ${plan.items.length} tasks to queue</button><button data-discard-plan="${esc(plan.id)}">Discard proposal</button></div>`:'<p class="setting-note">Tasks are queued. Tell me what to start, or ask to begin the queue.</p>'}</section>`;
+}
+document.addEventListener('click',async e=>{
+  const button=e.target.closest('[data-confirm-plan],[data-discard-plan]');if(!button||busy||recording)return;
+  button.disabled=true;setBusy(true);stopSpeaking();cancelAutoSend();
+  try{if(button.dataset.confirmPlan){const plan=await api('plans/confirm',{planId:button.dataset.confirmPlan});await fetchState();present({title:'Your queue is ready.',body:`Added ${plan.items.length} tasks. What would you like to work on first?`,spoken:`Added ${plan.items.length} tasks to your queue. What would you like to work on first?`,taskPlan:plan,needsReply:true,advance:false},currentTask());}else{await api('plans/discard',{planId:button.dataset.discardPlan});await fetchState();present({title:'Proposal set aside.',body:'Tell me how you’d like to split the work instead.',spoken:'Proposal set aside. How would you like to split the work?',needsReply:true,advance:false},currentTask());}}
+  catch(error){notice(error.message);}finally{setBusy(false);if(button.isConnected)button.disabled=false;}
+});
+function showConductorQuestion(t){activeSubmission=null;pendingConductor=null;persistDraft();currentId=t.id;restoreDraft();const p=t.pending[0];present({title:p.question,body:p.context||'Take your time. I’m listening to the whole thought.',spoken:p.question,needsReply:true,advance:false},t);}
 function scheduleSend(){clearTimeout(autoSendTimer);if(!state.profile.autoSend||recording)return;if(busy){queuedPaste=true;return;}$('#input-hint').textContent='Thought received. Sending…  ·  Esc to hold';autoSendTimer=setTimeout(()=>{autoSendTimer=null;$('#input-hint').textContent='Your dictation shortcut works here.';sendThought();},650);}
 function cancelAutoSend(){clearTimeout(autoSendTimer);autoSendTimer=null;pendingAutoAdvance=false;clearTimeout(advanceTimer);$('#input-hint').textContent='Take your time. Enter when you’re ready.';}
+function renderThoughtControl(){
+  const coordinator=conductor(),stoppable=!!activeSubmission||!!pendingConductor||!!(currentTask()?.isConductor&&['running','waiting'].includes(coordinator?.status));
+  const answering=coordinator?.status==='waiting'&&(currentTask()?.isConductor||pendingConductor);
+  $('#submit-thought').hidden=stoppable&&!answering;$('#submit-thought').disabled=busy;$('#stop-thought').hidden=!stoppable;$('#stop-thought').disabled=cancellingThought;
+  $('#stop-thought').setAttribute('aria-label',cancellingThought?'Stopping Lounge turn':'Stop Lounge turn');
+}
+function finishStoppedTurn(submission,status){
+  stopAwaiting=null;activeSubmission=null;pendingConductor=null;queuedPaste=false;cancelAutoSend();setBusy(false);
+  const key=submission?.key||currentId||'conductor',draft=drafts[key];let restored=false;
+  if(submission&&(!draft?.text||draft.text.trim()===submission.text)&&(currentId||'conductor')===key){$('#thought').value=submission.text;persistDraft();resizeThought();restored=true;}
+  present({title:status==='review'?'This turn already finished.':'Stopped.',body:'Your place is saved. Review or replace the thought before sending again.',spoken:'',needsReply:true,advance:false},currentTask(),{read:false});
+  if(restored&&!recording&&!document.body.classList.contains('drawer-open'))$('#thought').select();
+  if(!currentId||currentTask()?.isConductor)acknowledgeDraftTarget();
+  $('#input-hint').textContent='Held for review. Enter when you’re ready.';
+}
+function settleStopFromState(){if(cancellingThought||!stopAwaiting)return;const task=state.tasks.find(t=>t.id===stopAwaiting.taskId);if(task&&!['running','waiting'].includes(task.status))finishStoppedTurn(stopAwaiting.submission,task.status);}
+async function stopThought(){
+  if(cancellingThought)return;
+  const submission=activeSubmission,coordinator=conductor(),submissionId=submission?.id||coordinator?.conductorSubmissionId;
+  cancellingThought=true;if(submission)submission.cancelled=true;pendingConductor=null;queuedPaste=false;cancelAutoSend();stopSpeaking();persistDraft();renderThoughtControl();$('#input-hint').textContent='Stopping…';
+  try{
+    let result={status:'cancelled'};
+    if(submission?.sent||!submission){if(submissionId)result=await api('conductor/cancel',{submissionId});else if(coordinator)result=await api(`tasks/${coordinator.id}/interrupt`,{});}
+    if(['running','waiting'].includes(result.status)){stopAwaiting={submission,taskId:result.taskId||coordinator?.id};await fetchState();settleStopFromState();if(stopAwaiting){notice('Stop requested. Waiting for the runtime to finish.');return;}}
+    else {await fetchState();finishStoppedTurn(submission,result.status);}
+  }catch(error){activeSubmission=submission;stopAwaiting=coordinator?{submission,taskId:coordinator.id}:null;notice('Could not confirm the stop. Your thought is held; press Stop to retry. '+error.message);}
+  finally{cancellingThought=false;settleStopFromState();renderThoughtControl();$('#input-hint').textContent=stopAwaiting?'Stop requested. Waiting for the runtime.':'Held for review. Enter when you’re ready.';}
+}
+$('#stop-thought').onclick=stopThought;
+function pauseForDictation(){stopSpeaking();cancelAutoSend();$('#input-hint').textContent='Playback paused. Finish your thought; your dictation app handles recording.';}
+function syncNativeShortcut(){window.webkit?.messageHandlers?.loungeShell?.postMessage({action:'dictationShortcut',code:state.profile.dictationShortcut?.code||'',capture:shortcutCapture?'1':'0'});}
+function renderDictationShortcut(){
+  $('#dictation-shortcut').textContent=shortcutCapture?'Press your dictation shortcut…':shortcutLabel(state.profile.dictationShortcut,isMac);
+  $('#dictation-shortcut').dataset.capturing=String(shortcutCapture);$('#dictation-shortcut').setAttribute('aria-label',shortcutCapture?'Press your dictation shortcut; Escape cancels':'Change dictation shortcut: '+shortcutLabel(state.profile.dictationShortcut,isMac));$('#clear-dictation-shortcut').textContent=shortcutCapture?'Cancel':'Clear';
+}
+function finishShortcut(shortcut){shortcutCapture=false;shortcutModifier=null;syncNativeShortcut();savePreference({dictationShortcut:validateShortcut(shortcut)});renderDictationShortcut();}
+function observeShortcut(raw){
+  const event=shortcutEvent(raw);if(!event)return;
+  if(shortcutCapture){
+    if(event.code==='Escape'){shortcutCapture=false;shortcutModifier=null;syncNativeShortcut();renderDictationShortcut();return;}
+    if(isModifierCode(event.code)&&event.code!=='Fn'){if(event.pressed)shortcutModifier=event;else if(shortcutModifier?.code===event.code)finishShortcut(shortcutModifier);return;}
+    if(event.pressed){try{finishShortcut(event);}catch(error){notice(error.message);}}return;
+  }
+  if(matchesShortcut(state.profile.dictationShortcut,event))pauseForDictation();
+}
+$('#dictation-shortcut').onclick=()=>{stopSpeaking();cancelAutoSend();shortcutCapture=!shortcutCapture;shortcutModifier=null;syncNativeShortcut();renderDictationShortcut();};
+$('#clear-dictation-shortcut').onclick=()=>finishShortcut(shortcutCapture?state.profile.dictationShortcut:null);
+for(const type of ['keydown','keyup'])document.addEventListener(type,e=>{if(shortcutCapture){e.preventDefault();e.stopImmediatePropagation();}observeShortcut(e);},true);
+document.addEventListener('lounge:dictation-key',e=>observeShortcut(e.detail));
 $('#thought').addEventListener('input',e=>{if(speechActive)stopSpeaking();pendingAutoAdvance=false;clearTimeout(advanceTimer);persistDraft();resizeThought();const inserted=Math.max(e.data?.length||0,$('#thought').value.length-lastValue,0);lastValue=$('#thought').value;if(isDictationCommit({inputType:e.inputType,insertedLength:inserted,isComposing:e.isComposing,pasted:Date.now()-lastPasteAt<150,manualKeyRecent:Date.now()-lastManualKeyAt<100}))scheduleSend();else cancelAutoSend();});
 $('#thought-form').onsubmit=e=>{e.preventDefault();sendThought();};
 $('#thought').addEventListener('keydown',e=>{if(e.key.length===1&&!e.metaKey&&!e.ctrlKey&&!e.altKey)lastManualKeyAt=Date.now();if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendThought();}});
@@ -522,7 +600,7 @@ const events=new EventSource('/api/events');
 events.addEventListener('state',e=>{
   const previous=state, next=JSON.parse(e.data);state={...state,...next};overlaySettings();
   for(const task of state.tasks){const old=previous.tasks.find(t=>t.id===task.id);if(inRotation(task,state.rotationMode)&&old&&!inRotation(old,previous.rotationMode))delete seen[task.id];}
-  renderChrome();consumeConductor();warmUpcoming();
+  renderChrome();settleStopFromState();consumeConductor();warmUpcoming();
   if(!maySurfaceQueue({session,queueStarted,busy,pendingConductor}))return;
   const old=currentId?previous.tasks.find(t=>t.id===currentId):null,t=currentTask();
   if(t&&!t.isConductor&&old&&inRotation(old,previous.rotationMode)&&!inRotation(t,state.rotationMode)){

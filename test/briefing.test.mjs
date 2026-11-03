@@ -17,15 +17,15 @@ test('a newer question invalidates generated context and cannot be paraphrased b
 });
 test('fallback purpose never implies completion of the whole task',()=>{const scene=savedBrief({id:'a',title:'Task',status:'review',brief:'Original goal',pending:[],summary:'Raw tool dump'});assert.match(scene.body,/ready for your review/);assert.doesNotMatch(scene.body,/Raw tool dump/);});
 
-test('a choice briefing carries every quoted alternative into visual and spoken output',async()=>{
+test('a choice briefing displays exact alternatives but speaks only the summary and decision',async()=>{
  const {completeBrief,briefingSources}=await import('../lib/briefing.mjs');const task={id:'choice',title:'Choose a reply',brief:'Draft a reply.',pending:[],sourceHistory:[{role:'agent',text:'Short:\n“Keep it simple.”\nWarm:\n“Thanks, I would like that.”\nPlayful:\n“Make it a surprise.”'}]};const source=briefingSources(task).find(s=>s.role==='agent');
  const scene=completeBrief({title:'Choose a reply',context:'Draft a reply.',update:'Three drafts are ready.',decision:'Which one sounds like you?',missingDetails:false,choices:[{label:'Short',quote:'Keep it simple.',sourceId:source.id},{label:'Warm',quote:'Thanks, I would like that.',sourceId:source.id},{label:'Playful',quote:'Make it a surprise.',sourceId:source.id}]},task);
- for(const text of ['Keep it simple.','Thanks, I would like that.','Make it a surprise.']){assert.ok(scene.choices.some(c=>c.quote===text));assert.ok(scene.spoken.includes(text));assert.ok(scene.resumeSpoken.includes(text));}assert.doesNotMatch(scene.resumeBody,/Draft a reply/);
+ for(const text of ['Keep it simple.','Thanks, I would like that.','Make it a surprise.']){assert.ok(scene.choices.some(c=>c.quote===text));assert.ok(!scene.spoken.includes(text));assert.ok(!scene.resumeSpoken.includes(text));}assert.doesNotMatch(scene.resumeBody,/Draft a reply/);
  assert.throws(()=>completeBrief({title:'Wrong',context:'',update:'',decision:'Choose',choices:[{label:'Invented',quote:'Not in the source.',sourceId:source.id}]},task),/ungrounded/);
 });
 test('saved and incomplete model briefings show source alternatives instead of a blind choice',async()=>{
  const {completeBrief}=await import('../lib/briefing.mjs');const task={id:'a',title:'Pick a tone',brief:'Draft a reply',pending:[],sourceHistory:[{role:'agent',text:'Short:\n“Keep it simple.”\nWarm:\n“Thanks, I would like that.”'}]};
- const fallback=savedBrief(task);assert.match(fallback.choiceExcerpt,/Keep it simple/);assert.match(fallback.spoken,/Thanks, I would like that/);
+ const fallback=savedBrief(task);assert.match(fallback.choiceExcerpt,/Keep it simple/);assert.doesNotMatch(fallback.spoken,/Thanks, I would like that/);
  const incomplete=completeBrief({title:'Pick',context:'Draft',update:'Drafts ready',decision:'Choose one.',choices:[],missingDetails:false},task);assert.match(incomplete.choiceExcerpt,/Keep it simple/);
 });
 test('prefetch does not mark a briefing heard and visible exposure persists across restart',async()=>{

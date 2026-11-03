@@ -10,6 +10,9 @@ final class LoungeApplication: NSObject, NSApplicationDelegate, WKNavigationDele
     var received = Data()
     var port = 4317
     var quitting = false
+    var dictationMonitor: Any?
+    var dictationCode = "Fn"
+    var captureDictationShortcut = false
     let bridgeQueue = DispatchQueue(label: "local.commandlounge.desktop", qos: .userInitiated)
     let writeLock = NSLock()
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -35,6 +38,11 @@ final class LoungeApplication: NSObject, NSApplicationDelegate, WKNavigationDele
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:1380,height:900),styleMask:[.titled,.closable,.miniaturizable,.resizable,.fullSizeContentView],backing:.buffered,defer:false)
         window.title="Lounge";window.titleVisibility = .hidden;window.titlebarAppearsTransparent=true;window.backgroundColor=NSColor(white:0.08,alpha:1)
         window.collectionBehavior=[.fullScreenPrimary];window.minSize=NSSize(width:720,height:560);window.contentView=web;window.center();window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
+        // Observe only this app's modifier events. Return the original event so
+        // Wispr and system shortcuts keep their own behavior and ownership.
+        dictationMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
+            self?.observeDictationKey(event); return event
+        }
         startBackend(state)
     }
     func startBackend(_ state: URL) {
@@ -78,10 +86,19 @@ final class LoungeApplication: NSObject, NSApplicationDelegate, WKNavigationDele
             }
         }
     }
+    func observeDictationKey(_ event: NSEvent) {
+        guard NSApp.isActive else { return }
+        let codes: [UInt16:(String,NSEvent.ModifierFlags)] = [63:("Fn",.function),59:("ControlLeft",.control),62:("ControlRight",.control),56:("ShiftLeft",.shift),60:("ShiftRight",.shift),58:("AltLeft",.option),61:("AltRight",.option),55:("MetaLeft",.command),54:("MetaRight",.command)]
+        guard let (code,flag)=codes[event.keyCode],captureDictationShortcut || code==dictationCode else { return }
+        let detail: [String:Any] = ["code":code,"pressed":event.modifierFlags.contains(flag),"ctrlKey":event.modifierFlags.contains(.control),"altKey":event.modifierFlags.contains(.option),"shiftKey":event.modifierFlags.contains(.shift),"metaKey":event.modifierFlags.contains(.command)]
+        guard let data=try? JSONSerialization.data(withJSONObject:detail),let json=String(data:data,encoding:.utf8) else {return}
+        web?.evaluateJavaScript("document.dispatchEvent(new CustomEvent('lounge:dictation-key',{detail:\(json)}))",completionHandler:nil)
+    }
     @objc func openSettings() { web?.evaluateJavaScript("document.dispatchEvent(new CustomEvent('lounge:settings'))", completionHandler:nil) }
     func userContentController(_ userContentController: WKUserContentController,didReceive message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame,message.frameInfo.securityOrigin.host=="127.0.0.1",message.frameInfo.securityOrigin.port==port,
               let body=message.body as? [String:String] else {return}
+        if body["action"]=="dictationShortcut" {dictationCode=String((body["code"] ?? "").prefix(24));captureDictationShortcut=body["capture"]=="1"}
         if body["action"]=="fullscreen" {window.toggleFullScreen(nil)}
         if body["action"]=="openClaude",let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.anthropic.claudefordesktop") {NSWorkspace.shared.openApplication(at:url,configuration:NSWorkspace.OpenConfiguration(),completionHandler:nil)}
     }
@@ -96,7 +113,7 @@ final class LoungeApplication: NSObject, NSApplicationDelegate, WKNavigationDele
     func openExternal(_ url:URL) {if ["https","http","codex"].contains(url.scheme ?? "") {NSWorkspace.shared.open(url)}}
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool {true}
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool {window?.makeKeyAndOrderFront(nil);return true}
-    func applicationWillTerminate(_ notification:Notification) {quitting=true;backendInput?.closeFile();backend?.terminate()}
+    func applicationWillTerminate(_ notification:Notification) {quitting=true;if let monitor=dictationMonitor {NSEvent.removeMonitor(monitor)};backendInput?.closeFile();backend?.terminate()}
     func showError(_ text:String) {let alert=NSAlert();alert.messageText="Lounge needs attention";alert.informativeText=text;alert.runModal()}
 }
 @main struct LoungeMain {static func main(){let application=NSApplication.shared;let delegate=LoungeApplication();application.delegate=delegate;application.setActivationPolicy(.regular);application.run()}}

@@ -120,11 +120,14 @@ const server = createServer(async (req, res) => {
       if (url.pathname === '/api/migration/handoff') return send(res,200,await engine.migration.handoff(b.taskId));
       if (url.pathname === '/api/brief') return send(res, 200, await engine.brief(b.taskId));
       if (url.pathname === '/api/login') return send(res, 200, await engine.providers.adapter('codex').login());
+      if(url.pathname==='/api/plans/confirm')return send(res,200,engine.taskPlans.confirm(b.planId,{direct:true}));
+      if(url.pathname==='/api/plans/discard')return send(res,200,engine.taskPlans.discard(b.planId));
+      if(url.pathname==='/api/conductor/cancel')return send(res,200,await engine.cancelConductor(b.submissionId));
       if (url.pathname === '/api/conductor') {
         const prior = store.receipt(b.commandId);
         if (prior) return send(res, 200, prior);
         store.once(b.commandId, () => ({ accepted: true, kind: 'conductor' }));
-        return send(res, 200, await engine.conductor(b.text, { taskId: b.taskId, requestId: b.requestId, briefKey:b.briefKey }));
+        return send(res, 200, await engine.conductor(b.text, { taskId: b.taskId, requestId: b.requestId, briefKey:b.briefKey,submissionId:b.commandId }));
       }
       if (url.pathname === '/api/capture') {
         const t = store.once(b.commandId, () => engine.capture(b)); engine.changed(); return send(res, 200, t);

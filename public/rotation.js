@@ -10,6 +10,7 @@ export function compareTasks(a,b,sortMode='recent'){
 }
 export const ROTATION_MODES = ['all', 'work', 'personal'];
 export function projectIdentity(task, projects = []) {
+  if(!task.external&&task.queueProject?.key&&task.queueProject?.name)return task.queueProject;
   const label = task.external ? task.sourceProjectName?.trim() : '';
   if (label) {
     const project = projects.find(p => p.name === label);

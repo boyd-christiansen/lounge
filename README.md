@@ -75,3 +75,15 @@ The public branch starts from a clean source baseline. Private pre-publication h
 Queue states describe the current turn, not completion of the whole project: **Working**, **Needs your answer**, **Approval needed**, **Ready for review**, **Next step** (already presented), **Paused**, **Needs attention**, or **Saved snapshot** when live completion cannot be verified. Opening a result never removes it. Hover or focus a queue row for context and a state explanation.
 
 Shortcut keycaps are shown beside their controls: **⇧⌘P** toggles Work only/All, **⌘,** opens Settings and **Command-backslash** opens the queue (Control replaces Command on other platforms). **Escape** closes the drawer.
+
+## Dictation, stopping and planning
+
+Settings → Voice → **Dictation shortcut** records your existing dictation key. Fn/Globe is the Mac default; double-tap dictation stops playback on the first press. The binding only pauses Lounge playback while Lounge is focused; Wispr still owns recording and transcription. Native Fn/modifier events use an app-local monitor, with no systemwide keyboard capture. Browser previews support ordinary keyboard chords; Fn needs Lounge.app.
+
+The composer shows **Stop** while the coordinator is thinking, including provider startup. A stopped thought stays selected for review or replacement and is never automatically resent. Stop interrupts that coordinator turn and blocks its later tool calls. Separate agents already dispatched continue running; completed actions are retained.
+
+Briefings speak the summary and immediate decision. Exact alternatives and source excerpts stay on screen. Ask explicitly to hear a particular passage. New tasks stay in focus. Explicit “send this and move on” and clear handoffs can advance; unclear transitions ask whether to stay or move on.
+
+For a brain dump, Lounge proposes a **queue plan** before adding tasks: project groups, task boundaries, priorities, project/chat positions and any workspace gaps. Revise it by voice, then approve by voice or with **Add tasks to queue**. Approval adds and orders the batch atomically; it starts no agents. Changed queues require a fresh preview, and repeated approval does not create duplicates. A new logical project can be organized before choosing its execution workspace; work cannot start until that workspace is assigned.
+
+[Queue-plan preview](docs/images/task-plan.jpg) · [Dictation setting](docs/images/dictation-shortcut.jpg)

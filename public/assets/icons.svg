@@ -25,4 +25,4 @@
   <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"/>
 </symbol><symbol id="arrow-up" viewBox="0 0 24 24">
   <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18"/>
-</symbol></svg>
+</symbol><symbol id="stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></symbol></svg>

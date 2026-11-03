@@ -70,3 +70,16 @@ The native minimum-window check and final installed verification are recorded in
 ## Remaining limits
 
 The Claude bridge still detects some plain-language questions heuristically; unsupported approvals stay in the source app. Artifacts remain escaped text and source links. Those limitations must not be hidden by a polished presentation. A full screen-reader and alternate display-scaling audit remains separate from the geometry and keyboard checks recorded here.
+
+
+## 0.7 interaction review
+
+The dictation binding is part of Voice and autosaves like other preferences. It listens at key press rather than waiting for transcription. Double-tap setups pause on the first press; the dictation tool retains its shortcut. Capture, cancel and clear states are explicit.
+
+A square Stop glyph uses the same 32px composer target and outline grid as Send and Microphone. It appears during coordinator admission as well as active inference. Waiting questions retain Send alongside Stop. Stopped text is held and selected for replacement rather than silently resubmitted. A response arriving during a draft offers a visible Review response action without replacing that draft.
+
+Queue plans remain in the current scene, with project ranks, new task briefs/priorities, existing chat positions and workspace gaps. The artifact has explicit add/discard actions and can be revised through the main voice/text input. Long plans scroll within the scene with a visible scrollbar and clearance above the composer. Adding the plan is separate from starting agents. Finished plans do not reappear on unrelated later responses.
+
+The spoken channel carries the synopsis and decision; full grounded alternatives remain visual. Transitions stay with new work, advance on explicit intent or a clear handoff, and ask when unclear. These are semantic interaction states, not confidence thresholds.
+
+Synthetic release previews: [task plan and approval](images/task-plan.jpg), [dictation shortcut](images/dictation-shortcut.jpg).
