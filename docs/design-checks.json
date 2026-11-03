@@ -1,6 +1,5 @@
 {
   "checked": "2026-11-02",
-  "profile": "synthetic",
   "delivery": {
     "centerY": 398.5,
     "fontSize": "13px",
@@ -78,5 +77,15 @@
       64.34375,
       64.34375
     ]
+  },
+  "browserProfile": "synthetic",
+  "nativeMinimum": {
+    "width": 720,
+    "height": 560,
+    "screenshotScale": 2,
+    "dropdownHeight": 36,
+    "scrollingFormVerified": true,
+    "fixedSaveVerified": true,
+    "check": "manual installed-app check; no source content recorded"
   }
 }

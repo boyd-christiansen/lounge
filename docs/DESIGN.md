@@ -51,9 +51,9 @@ At the checked desktop viewport, the drawer is about 461px wide. Main control ta
 
 Public screenshots use synthetic projects and a demo profile:
 
-- [Project queue](images/project-queue.png)
-- [Voice settings](images/voice-settings.png)
-- [Room](images/room.png)
+- [Project queue](images/project-queue.jpg)
+- [Voice settings](images/voice-settings.jpg)
+- [Room](images/room.jpg)
 
 The native minimum-window check and final installed verification are recorded in [PROGRESS.md](PROGRESS.md). The fixed Save area and scrolling form are designed to keep controls reachable at that size.
 

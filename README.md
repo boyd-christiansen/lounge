@@ -6,7 +6,7 @@ A quiet local room for working through parallel agents. Speak a complete thought
 
 Lounge keeps one conversation on screen. The queue lives behind the left edge. **Space** plays a personalized greeting and opens the input. Tell Lounge to start the queue, add a task, or find an existing conversation.
 
-![The Lounge room, with a synthetic profile](docs/images/room.png)
+![The Lounge room, with a synthetic profile](docs/images/room.jpg)
 
 ## Run locally
 
